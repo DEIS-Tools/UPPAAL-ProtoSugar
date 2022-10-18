@@ -1,0 +1,40 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.7.10'
+    id 'application'
+}
+
+group = 'org.example'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.jetbrains.kotlin:kotlin-test'
+    implementation group: 'org.simpleframework', name: 'simple-xml', version: '2.7.1'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+compileKotlin {
+    kotlinOptions.jvmTarget = '17'
+}
+
+compileTestKotlin {
+    kotlinOptions.jvmTarget = '17'
+}
+
+application {
+    mainClassName = 'MainKt'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'MainKt'
+    }
+    from { configurations.compileClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
