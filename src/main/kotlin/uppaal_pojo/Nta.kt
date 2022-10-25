@@ -7,7 +7,7 @@ import org.simpleframework.xml.Root
 @Root(name = "nta")
 class Nta {
     @field:Element(name = "declaration")
-    lateinit var declaration: String
+    lateinit var declarations: String
 
     @field:ElementList(name = "template", required = false, inline = true)
     lateinit var templates: List<Template>

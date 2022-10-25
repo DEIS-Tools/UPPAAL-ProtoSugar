@@ -1,7 +1,8 @@
-package mappers
+package mapping
 
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
+import parsing.Parser
 import uppaal_pojo.Label
 import uppaal_pojo.Nta
 import uppaal_pojo.Template
@@ -9,10 +10,6 @@ import uppaal_pojo.Transition
 import java.io.InputStream
 import java.io.StringWriter
 import java.util.LinkedList
-
-class Parameter (var baseType: String, var arrayType: String)
-class PaChaMap : HashMap<String, LinkedList<Parameter>>()
-// PaCha = Parameterized Channel
 
 
 class PaChaMapper {
@@ -43,10 +40,13 @@ class PaChaMapper {
 
     private fun convertNta(nta: Nta): Nta
     {
+        val result = Parser().parseNta(nta);
+
+
         val globalPaChas = PaChaMap()
         val templatePaChaMaps: HashMap<String, PaChaMap> = HashMap()
 
-        nta.declaration = mapDeclaration(nta.declaration, globalPaChas)
+        nta.declarations = mapDeclaration(nta.declarations, globalPaChas)
         convertTemplates(nta.templates, globalPaChas, templatePaChaMaps)
         nta.system = mapSystem(nta.system, globalPaChas, templatePaChaMaps)
 
@@ -61,7 +61,7 @@ class PaChaMapper {
         {
             val hasAmp = match.groups[2]!!.value.contains('&')
             val chanName = match.groups[3]!!.value
-            val params = LinkedList<Parameter>()
+            val params = LinkedList<String>()
 
             var newDecl = "chan ${if (hasAmp) "&" else ""}${chanName}${match.groups[4]?.value ?: ""};" // &ch[size]
             for (type in typeInsideListPattern.findAll(match.groups[1]!!.value).map { it.value })
@@ -71,7 +71,7 @@ class PaChaMapper {
 
                 newDecl += " meta $baseType ${chanName}_p${params.size+1}${arrayType};"
 
-                params.add(Parameter(baseType, arrayType))
+                //params.add(ChannelParameter(baseType, arrayType))
             }
 
             paChas[chanName] = params
@@ -103,19 +103,21 @@ class PaChaMapper {
 
         for (match in chanDeclPattern.findAll(parameters))
         {
+            val parameterList = match.groups[1]!!.value
             val hasAmp = match.groups[2]!!.value.contains('&')
             val chanName = match.groups[3]!!.value
-            val params = LinkedList<Parameter>()
+            val arrayPart = match.groups[4]?.value ?: ""
+            val params = LinkedList<String>()
 
-            var newParam = "chan ${if (hasAmp) "&" else ""}${chanName}${match.groups[4]?.value ?: ""}"
-            for (type in typeInsideListPattern.findAll(match.groups[1]!!.value).map { it.value })
+            var newParam = "chan ${if (hasAmp) "&" else ""}${chanName}${arrayPart}"
+            for (type in typeInsideListPattern.findAll(parameterList).map { it.value })
             {
                 val baseType = type.substringBefore('[')
                 val arrayType = if (baseType.length != type.length) type.substring(baseType.length) else ""
 
                 newParam += ", $baseType &${chanName}_p${params.size+1}${arrayType}"
 
-                params.add(Parameter(baseType, arrayType))
+                //params.add(ChannelParameter(baseType, arrayType))
             }
 
             templatePaChas[chanName] = params
@@ -132,7 +134,6 @@ class PaChaMapper {
             ?: Label("assignment", sync.x, sync.y + 17)
                 .let { label -> transition.labels!!.add(label); label }
 
-        // TODO: Determine "parameterized?", "shouter?" and "listener?"
         convertShout(sync, update, globalPaChas, templatePaChas)
         convertListen(sync, update, globalPaChas, templatePaChas)
     }
@@ -228,9 +229,9 @@ class PaChaMapper {
             val newParams = LinkedList<String>()
             for (expr in extractExpressions(params))
             {
-                newParams.add(expr);
+                newParams.add(expr)
                 val possibleChanName = expr.substringBefore('[') // expr.replace(Regex("""\[\s*[^,\[\]]+\]"""), "") // Remove subscripts
-                val paCha: List<Parameter> = localPaChas[possibleChanName] ?: globalPaChas[possibleChanName] ?: continue
+                val paCha: List<String> = localPaChas[possibleChanName] ?: globalPaChas[possibleChanName] ?: continue
                 for ((index, _) in paCha.withIndex())
                     newParams.add("${possibleChanName}_p${index + 1}")
             }
@@ -249,7 +250,7 @@ class PaChaMapper {
         val processPattern = Regex("""([a-zA-Z_][a-zA-Z0-9_]*)\s*\(((?>[^:()]|\([^:()]*\))*)\)""")
         for (match in processPattern.findAll(system.replace(Regex("""gantt\s*\{[^\}]*\}"""), "")))
             if (templateNames.contains(match.groups[1]!!.value))
-                instantiations.add(Triple(match.groups[1]!!.value, match.groups[2]!!.value, match.groups[0]!!.value));
-        return instantiations;
+                instantiations.add(Triple(match.groups[1]!!.value, match.groups[2]!!.value, match.groups[0]!!.value))
+        return instantiations
     }
 }
