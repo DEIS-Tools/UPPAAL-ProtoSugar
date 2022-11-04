@@ -4,7 +4,7 @@ import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Root
 
 @Root(name = "target")
-class Target {
+class Target : UppaalPojo {
     @field:Attribute(name = "ref")
     lateinit var ref: String
 }

@@ -1,18 +1,17 @@
 package uppaal_pojo
 
 import org.simpleframework.xml.*
-import java.util.LinkedList
 
 @Root(name = "template")
-class Template {
+class Template : UppaalPojo {
     @field:Element(name = "name", required = false)
     var name: String? = null
 
     @field:Element(name = "parameter", required = false)
-    var parameter: String? = null
+    var parameter: Parameter? = null
 
     @field:Element(name = "declaration", required = false)
-    var declaration: String? = null
+    var declaration: Declaration? = null
 
     @field:ElementList(name = "location", required = false, inline = true)
     var locations: List<Location>? = null
@@ -24,5 +23,5 @@ class Template {
     var init: Init? = null
 
     @field:ElementList(name = "transition", required = false, inline = true)
-    var transitions: LinkedList<Transition>? = null
+    var transitions: List<Transition>? = null
 }

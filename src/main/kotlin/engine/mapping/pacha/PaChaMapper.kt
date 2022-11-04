@@ -1,8 +1,7 @@
-package mapping
+package engine.mapping.pacha
 
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
-import parsing.Parser
 import uppaal_pojo.Label
 import uppaal_pojo.Nta
 import uppaal_pojo.Template
@@ -40,15 +39,13 @@ class PaChaMapper {
 
     private fun convertNta(nta: Nta): Nta
     {
-        val result = Parser().parseNta(nta);
-
-
+        //val result = MapperEngine().parseNta(nta);
         val globalPaChas = PaChaMap()
         val templatePaChaMaps: HashMap<String, PaChaMap> = HashMap()
 
-        nta.declarations = mapDeclaration(nta.declarations, globalPaChas)
+        nta.declaration.content = mapDeclaration(nta.declaration.content, globalPaChas)
         convertTemplates(nta.templates, globalPaChas, templatePaChaMaps)
-        nta.system = mapSystem(nta.system, globalPaChas, templatePaChaMaps)
+        nta.system.content = mapSystem(nta.system.content, globalPaChas, templatePaChaMaps)
 
         return nta
     }
@@ -87,8 +84,8 @@ class PaChaMapper {
         {
             val templatePaChas = PaChaMap()
 
-            if (null != template.parameter) template.parameter = mapParameters(template.parameter!!, templatePaChas)
-            if (null != template.declaration) template.declaration = mapDeclaration(template.declaration!!, templatePaChas)
+            if (null != template.parameter) template.parameter!!.content= mapParameters(template.parameter!!.content, templatePaChas)
+            if (null != template.declaration) template.declaration!!.content= mapDeclaration(template.declaration!!.content, templatePaChas)
             if (null != template.transitions)
                 for (transition in template.transitions!!)
                     convertTransition(transition, globalPaChas, templatePaChas)

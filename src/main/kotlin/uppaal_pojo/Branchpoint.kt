@@ -4,7 +4,7 @@ import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Root
 
 @Root(name = "branchpoint")
-class Branchpoint {
+class Branchpoint : UppaalPojo {
     @field:Attribute(name = "id")
     lateinit var id: String
 

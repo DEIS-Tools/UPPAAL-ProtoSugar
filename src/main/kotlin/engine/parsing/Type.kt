@@ -1,27 +1,27 @@
-package parsing
+package engine.parsing
 
-abstract class Type {
-    abstract val isReference: Boolean
+interface Type {
+    val isReference: Boolean
 }
 
 class SimpleType(
     val typeName: String,
     val range: String,
     override val isReference: Boolean
-) : Type()
+) : Type
 
 class ChannelType(
     val parameters: List<Type>,
     override val isReference: Boolean
-) : Type()
+) : Type
 
 class ArrayType(
     val elementType: Type,
     override val isReference: Boolean,
     val dimensions: List<String>
-) : Type()
+) : Type
 
 class StructType(
     val fields: List<Type>,
     override val isReference: Boolean,
-) : Type()
+) : Type

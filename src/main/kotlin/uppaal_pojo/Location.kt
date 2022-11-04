@@ -6,7 +6,7 @@ import org.simpleframework.xml.ElementList
 import org.simpleframework.xml.Root
 
 @Root(name = "location")
-class Location {
+class Location : UppaalPojo {
     @field:Attribute(name = "id")
     lateinit var id: String
 

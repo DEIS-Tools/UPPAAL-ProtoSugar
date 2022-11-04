@@ -1,4 +1,4 @@
-package parsing
+package engine.parsing
 
 import java.lang.Exception
 import java.lang.Character.MIN_VALUE as nullChar
@@ -16,7 +16,7 @@ import java.lang.Character.MIN_VALUE as nullChar
 class Confre(grammar: String) {
     private val eof: NamedTerminal = NamedTerminal(-1, "EOF", Regex(nullChar.toString()))
     private val terminals: MutableList<Terminal> = ArrayList()
-    private val nonTerminals: MutableMap<String ,NonTerminal> = HashMap()
+    private val nonTerminals: MutableMap<String , NonTerminal> = HashMap()
     private var rootNonTerminal: String
 
     private val stringPattern = Regex("""'((?>(?>\\[\\'])|[^'\s\\])*)'""")
@@ -49,7 +49,8 @@ class Confre(grammar: String) {
         )
         nonTerminals["BODY"] = NonTerminal("BODY",
             Sequential(listOf(
-                Multiple(Choice(listOf( // {
+                Multiple(
+                    Choice(listOf( // {
                     TerminalRef(0), // IDENTIFIER |
                     TerminalRef(1), // STRING |
                     Sequential(listOf( // '(' BODY ')' |
@@ -61,10 +62,13 @@ class Confre(grammar: String) {
                     Sequential(listOf( // '{' BODY '}'
                         TerminalRef(6), NonTerminalRef("BODY", nonTerminals), TerminalRef(7)
                     ))
-                ))), // }
-                Optional(Sequential(listOf( // { '|' BODY
+                ))
+                ), // }
+                Optional(
+                    Sequential(listOf( // { '|' BODY
                     TerminalRef(8), NonTerminalRef("BODY", nonTerminals)
-                ))) // }
+                ))
+                ) // }
             ))
         )
     }
@@ -121,7 +125,7 @@ class Confre(grammar: String) {
                 val token = (choiceParts.next() as Leaf).token!! // First element must always be a leaf
                 val terminal = token.terminal
                 when (terminal.id) {
-                    /* Identifier */ 0 -> sequence.add(NonTerminalRef(token.value, nonTerminals))
+                    /* Identifier */ 0 -> sequence.add(determineTerminalOrNonTerminal(token))
                     /* String */     1 -> sequence.add(TerminalRef(terminals.filterIsInstance<AnonymousTerminal>().find { it.value == token.value.trim('\'').replace("\\'", "'") }!!.id))
                     /* Group */      2 -> sequence.add(parseBody(choiceParts.next() as Node))
                     /* Optional */   4 -> sequence.add(Optional(parseBody(choiceParts.next() as Node)))
@@ -148,6 +152,15 @@ class Confre(grammar: String) {
         return result
     }
 
+    private fun determineTerminalOrNonTerminal(token: Token): Grammar
+    {
+        val terminal = terminals.filterIsInstance<NamedTerminal>().find { it.name == token.value }
+        return if (null != terminal)
+            TerminalRef(terminal.id)
+        else
+            NonTerminalRef(token.value, nonTerminals)
+    }
+
 
     // Parsing
     private fun tokens(string: String, startIndex: Int): Sequence<Token> {
@@ -162,7 +175,7 @@ class Confre(grammar: String) {
         fun getToken(): Token {
             // Reverse to give anonymous terminals first priority
             val firstMatch = terminals.reversed().firstOrNull { it.matches(value) } ?: AnonymousTerminal(-1, value)
-            return Token(lineStart, columnStart, column, index - value.length + 1, value, firstMatch)
+            return Token(lineStart, columnStart, column, index - value.length, value, firstMatch)
         }
 
         fun handleWhitespace(char: Char): Boolean {
@@ -312,14 +325,17 @@ class Confre(grammar: String) {
 
 
     // Public
+    @Suppress("MemberVisibilityCanBePrivate")
     fun matchExact(string: String): ParseTree? {
         return match(string, startIndex = 0, allowPartialMatch = false)
     }
 
+    @Suppress("MemberVisibilityCanBePrivate")
     fun find(string: String, startIndex: Int = 0): ParseTree? {
         return match(string, startIndex, allowPartialMatch = true)
     }
 
+    @Suppress("MemberVisibilityCanBePrivate")
     fun findAll(string: String): Sequence<ParseTree> {
         return sequence {
             var matchVal: ParseTree? = match(string, startIndex = 0, allowPartialMatch = true)
@@ -478,8 +494,12 @@ interface ParseTree {
     val grammar: Grammar
 
     fun notBlank(): Boolean
+    /** Get the inclusive start index **/
     fun startPosition(): Int
+    /** Get the inclusive end index **/
     fun endPosition(): Int
+    /** Get the length of the match based on the start and end positions **/
+    fun length(): Int = endPosition() - startPosition() + 1;
 }
 
 class Node(override val grammar: Grammar, val children: List<ParseTree?>) : ParseTree {
@@ -497,7 +517,7 @@ class Leaf(override val grammar: Grammar, val token: Token?) : ParseTree {
 
     override fun notBlank() = grammar !is Blank
     override fun startPosition(): Int = token!!.startIndex
-    override fun endPosition(): Int = token!!.value.length
+    override fun endPosition(): Int = token!!.startIndex + token.value.length - 1
 
     override fun toString() = token?.value ?: ""
 }

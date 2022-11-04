@@ -4,7 +4,7 @@ import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Root
 
 @Root(name = "result")
-class Result {
+class Result : UppaalPojo {
     @field:Attribute(name = "outcome")
     lateinit var outcome: String
 

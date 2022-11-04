@@ -1,5 +1,6 @@
-import mapping.PaChaMapper
-import parsing.Parser
+import engine.MapperEngine
+import engine.mapping.Mapper
+import engine.mapping.autoarr.AutoArrMapper
 import java.io.*
 import java.lang.ProcessBuilder.Redirect
 import java.nio.charset.StandardCharsets
@@ -9,22 +10,67 @@ import kotlin.system.exitProcess
 const val FILE_TAG = "-file"
 const val SERVER_TAG = "-server"
 const val DEBUG_TAG = "-debug"
+const val MAPPERS_TAG = "-mappers"
+
+val mappers = mapOf<String, Mapper>(
+    //Pair("PaCha", null),
+    //Pair("ChRef", null),
+    Pair("AutoArr", AutoArrMapper()),
+    //Pair("Hiera", null)
+)
+lateinit var engine: MapperEngine
 
 fun main(args: Array<String>)
 {
-    //if (args.size != 2) usage()
+    val tags = getTags(args)
+    engine = MapperEngine(tags[MAPPERS_TAG]?.map { mappers[it]!! } ?: listOf())
 
     when {
-        FILE_TAG   == args[0] && args.size == 2 -> runMapper(File(args[1]))
-        SERVER_TAG == args[0] && args.size == 2 -> runServer(args[1])
-        DEBUG_TAG  == args[0] && args.size == 5 -> runDebug(File(args[1]), File(args[2]), File(args[3]), File(args[4]))
+        tags.containsKey(FILE_TAG) -> runMapper(File(args[1]))
+        tags.containsKey(SERVER_TAG) -> runServer(args[1])
+        tags.containsKey(DEBUG_TAG) -> runDebug(File(args[1]), File(args[2]), File(args[3]), File(args[4]))
         else -> usage()
     }
 }
 
+fun getTags(args: Array<String>): Map<String, List<String>>
+{
+    val tags = HashMap<String, List<String>>()
+
+    val argItr = args.iterator()
+    while (argItr.hasNext())
+        when (argItr.next()) {
+            FILE_TAG -> tags[FILE_TAG] = getParams(argItr, 1);
+            SERVER_TAG -> tags[SERVER_TAG] = getParams(argItr, 1);
+            DEBUG_TAG -> tags[DEBUG_TAG] = getParams(argItr, 4);
+            MAPPERS_TAG -> tags[MAPPERS_TAG] = getParams(argItr, 0);
+            else -> usage()
+        }
+
+    val modeTags = listOf(FILE_TAG, SERVER_TAG, DEBUG_TAG)
+    if (tags.keys.count { it in modeTags  } != 1)
+        usage()
+
+    return tags
+}
+
+fun getParams(argItr: Iterator<String>, count: Int): List<String>
+{
+    if (count <= 0)
+        return argItr.asSequence().toList()
+
+    val params = ArrayList<String>(count)
+    repeat(count) {
+        if (!argItr.hasNext()) usage()
+        params.add(argItr.next())
+        if (params.last().startsWith('-')) usage()
+    }
+    return params
+}
+
 fun runMapper(file: File)
 {
-    print(PaChaMapper().map(file.inputStream()))
+    print(engine.map(file.inputStream()))
 }
 
 fun runServer(server: String)
@@ -68,13 +114,13 @@ fun runServer(server: String)
 
 fun interceptXmlCmd(input: BufferedReader): String
 {
-    var originalModel = input.readLine();
+    var originalModel = input.readLine()
     originalModel = originalModel.substring(originalModel.indexOf("<?"))
     while (!originalModel.endsWith("\"}") || originalModel.endsWith("\\\"}"))
         originalModel += input.read().toChar()
     originalModel = originalModel.removeSuffix("\"}")
 
-    val mappedModel = PaChaMapper().map(originalModel.replace("\\\"", "\""))
+    val mappedModel = engine.map(originalModel.replace("\\\"", "\""))
 
     return "{\"cmd\":\"newXMLSystem3\",\"args\":\"${mappedModel.replace("\"", "\\\"")}\"}"
 }
@@ -131,8 +177,11 @@ fun runDebug(server: File, inputFile: File, outputFile: File, errorFile: File)
 
 fun usage()
 {
-    println("usage: uppaal_mapper $FILE_TAG FILE_PATH")
-    println("usage: uppaal_mapper $SERVER_TAG SERVER_PATH")
-    println("usage: uppaal_mapper $DEBUG_TAG SERVER_PATH STDIN_OUTPUT_PATH STDOUT_OUTPUT_PATH STDERR_OUTPUT_PATH")
+    println("usage: uppaal_mapper MODE MAPPERS")
+    println("MODE: $FILE_TAG FILE_PATH")
+    println("    | $SERVER_TAG SERVER_PATH")
+    println("    | $DEBUG_TAG SERVER_PATH STDIN_OUTPUT_PATH STDOUT_OUTPUT_PATH STDERR_OUTPUT_PATH")
+    println("MAPPERS: $MAPPERS_TAG { MAPPER }")
+    println("MAPPER: ${mappers.keys.joinToString(" | ", prefix = "'", postfix = "'")}")
     exitProcess(1)
 }

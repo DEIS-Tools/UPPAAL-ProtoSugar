@@ -5,7 +5,7 @@ import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text
 
 @Root(name = "label")
-class Label () {
+class Label() : UppaalPojo {
     @field:Attribute(name = "kind")
     lateinit var kind: String
 

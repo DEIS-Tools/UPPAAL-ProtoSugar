@@ -7,7 +7,7 @@ import org.simpleframework.xml.Root
 import java.util.*
 
 @Root(name = "transition")
-class Transition {
+class Transition : UppaalPojo {
     @field:Attribute(name = "id")
     lateinit var id: String
 
@@ -18,7 +18,7 @@ class Transition {
     lateinit var target: Target
 
     @field:ElementList(name = "label", inline = true, required = false)
-    var labels: LinkedList<Label>? = null
+    var labels: MutableList<Label>? = null
 
     @field:ElementList(name = "nail", inline = true, required = false)
     var nails: List<Nail>? = null

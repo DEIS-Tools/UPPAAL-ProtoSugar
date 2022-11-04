@@ -4,7 +4,7 @@ import org.simpleframework.xml.Element
 import org.simpleframework.xml.Root
 
 @Root(name = "query")
-class Query {
+class Query : UppaalPojo {
     @field:Element(name = "formula", required = false)
     lateinit var formula: String
 

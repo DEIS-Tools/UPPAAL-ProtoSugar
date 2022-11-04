@@ -1,0 +1,3 @@
+package uppaal_pojo
+
+interface UppaalPojo

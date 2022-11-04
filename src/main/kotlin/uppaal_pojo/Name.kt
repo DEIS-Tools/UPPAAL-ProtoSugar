@@ -5,7 +5,7 @@ import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text
 
 @Root(name = "name")
-class Name {
+class Name : UppaalPojo {
     @field:Attribute(name = "x")
     var x: Int = 0
 
