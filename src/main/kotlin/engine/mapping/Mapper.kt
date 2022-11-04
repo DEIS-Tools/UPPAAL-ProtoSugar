@@ -13,7 +13,7 @@ interface Mapper {
 abstract class Phase {
     val handlers = ArrayList<Triple<KType, List<Class<out UppaalPojo>>, Any>>()
 
-    protected inline fun <reified T : UppaalPojo> register(noinline handler: (T) -> (List<Error>), prefix: List<Class<out UppaalPojo>> = ArrayList()) {
+    protected inline fun <reified T : UppaalPojo> register(noinline handler: (List<PathNode>, T) -> List<Error>, prefix: List<Class<out UppaalPojo>> = ArrayList()) {
         handlers.add(Triple(typeOf<T>(), prefix.plus(T::class.java), handler))
     }
 
@@ -21,7 +21,7 @@ abstract class Phase {
         for (handler in handlers.filter { it.first == typeOf<T>() })
             if (pathMatchesFilter(handler.second, path))
                 @Suppress("UNCHECKED_CAST")
-                return (handler.third as (T) -> (List<Error>))(element)
+                return (handler.third as (List<PathNode>, T) -> List<Error>)(path, element)
         return listOf()
     }
 
