@@ -4,7 +4,7 @@ import org.simpleframework.xml.Element
 import org.simpleframework.xml.ElementList
 import org.simpleframework.xml.Root
 
-@Root(name = "nta")
+@Root(name = "nta", strict = false)
 class Nta : UppaalPojo {
     @field:Element(name = "declaration")
     lateinit var declaration: Declaration
@@ -14,7 +14,4 @@ class Nta : UppaalPojo {
 
     @field:Element(name = "system")
     lateinit var system: System
-
-    @field:ElementList(name = "queries")
-    lateinit var queries: List<Query>
 }

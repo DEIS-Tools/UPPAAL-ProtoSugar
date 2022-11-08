@@ -26,6 +26,8 @@ class Confre(grammar: String) {
         if (grammar.isNotBlank()) {
             populateTerminals(grammar)
             populateNonTerminals(grammar)
+
+            // TODO: Validate that all references terminals / non-terminals exist
         }
     }
 
@@ -49,8 +51,8 @@ class Confre(grammar: String) {
         )
         nonTerminals["BODY"] = NonTerminal("BODY",
             Sequential(listOf(
-                Multiple(
-                    Choice(listOf( // {
+                Multiple( // {
+                    Choice(listOf(
                     TerminalRef(0), // IDENTIFIER |
                     TerminalRef(1), // STRING |
                     Sequential(listOf( // '(' BODY ')' |
@@ -65,10 +67,10 @@ class Confre(grammar: String) {
                 ))
                 ), // }
                 Optional(
-                    Sequential(listOf( // { '|' BODY
+                    Sequential(listOf( // [ '|' BODY
                     TerminalRef(8), NonTerminalRef("BODY", nonTerminals)
                 ))
-                ) // }
+                ) // ]
             ))
         )
     }
@@ -119,7 +121,7 @@ class Confre(grammar: String) {
         // If the "multiple" part of BODY is not blank
         if (node.children[0]?.notBlank() == true) {
             val sequence = ArrayList<Grammar>()
-            val bodyParts = BufferedIterator((node.children[0] as Node).children.iterator())
+            val bodyParts = (node.children[0] as Node).children.iterator()
             while (bodyParts.hasNext()) { // BODY = Multiple(Choice(...))
                 val choiceParts = (bodyParts.next() as Node).children.iterator()
                 val token = (choiceParts.next() as Leaf).token!! // First element must always be a leaf
@@ -494,18 +496,32 @@ interface ParseTree {
     val grammar: Grammar
 
     fun notBlank(): Boolean
-    /** Get the inclusive start index **/
+    /** Get the line number on which this element begins **/
     fun startPosition(): Int
     /** Get the inclusive end index **/
     fun endPosition(): Int
     /** Get the length of the match based on the start and end positions **/
-    fun length(): Int = endPosition() - startPosition() + 1;
+    fun length(): Int = endPosition() - startPosition() + 1
+
+    fun preOrderWalk(): Sequence<ParseTree>
+    fun postOrderWalk(): Sequence<ParseTree>
 }
 
 class Node(override val grammar: Grammar, val children: List<ParseTree?>) : ParseTree {
     override fun notBlank() =  children.any { it?.notBlank() ?: false }
     override fun startPosition(): Int = children.first { it?.notBlank() ?: false }!!.startPosition()
-    override fun endPosition(): Int = children.last()!!.endPosition()
+    override fun endPosition(): Int = children.last { it?.notBlank() ?: false }!!.endPosition()
+
+    override fun preOrderWalk(): Sequence<ParseTree> = sequence{
+        yield(this@Node)
+        for (child in children.filterNotNull())
+            yieldAll(child.preOrderWalk())
+    }
+    override fun postOrderWalk(): Sequence<ParseTree> = sequence{
+        for (child in children.filterNotNull())
+            yieldAll(child.postOrderWalk())
+        yield(this@Node)
+    }
 
     override fun toString() = children.joinToString(" ")
 }
@@ -518,6 +534,9 @@ class Leaf(override val grammar: Grammar, val token: Token?) : ParseTree {
     override fun notBlank() = grammar !is Blank
     override fun startPosition(): Int = token!!.startIndex
     override fun endPosition(): Int = token!!.startIndex + token.value.length - 1
+
+    override fun preOrderWalk(): Sequence<ParseTree> = sequenceOf(this@Leaf)
+    override fun postOrderWalk(): Sequence<ParseTree> = sequenceOf(this@Leaf)
 
     override fun toString() = token?.value ?: ""
 }

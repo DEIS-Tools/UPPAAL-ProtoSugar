@@ -1,17 +1,79 @@
 package engine.mapping.pacha
 
+import engine.mapping.MapperError
+import engine.mapping.Mapper
+import engine.mapping.PathNode
+import engine.mapping.Phase
+import engine.parsing.Confre
+import engine.parsing.Node
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
-import uppaal_pojo.Label
-import uppaal_pojo.Nta
-import uppaal_pojo.Template
-import uppaal_pojo.Transition
+import uppaal_pojo.*
 import java.io.InputStream
 import java.io.StringWriter
 import java.util.LinkedList
 
 
-class PaChaMapper {
+class PaChaMap : HashMap<String, LinkedList<String>>()
+
+class PaChaMapper : Mapper {
+    override fun getPhases(): Sequence<Phase> = sequenceOf(Phase1())
+
+    private class Phase1 : Phase()
+    {
+        val globalPaChas = PaChaMap()
+        val templatePaChaMaps: HashMap<String, PaChaMap> = HashMap()
+
+        private val chanDeclGrammar = Confre("""
+            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
+            INT = ([1-9][0-9]*)|0*
+
+            ChanDecl :== 'chan' '(' Type {',' Type} ')' ['&'] IDENT {Array} [';'] .
+            Type     :== ['&'] ('chan' ['(' Type ')'] | 'int' | 'bool') {Array} .
+            Array    :== '[' (INT | IDENT) ']' .
+        """.trimIndent())
+
+        init {
+            register(::mapDeclaration)
+            //register(::mapSystem)
+        }
+
+        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<MapperError> {
+            val (newContent, errors) = mapParameterizedChannel(declaration.content, true, globalPaChas) // TODO FIX last param
+            declaration.content = newContent
+            return errors
+        }
+
+
+        private fun mapParameterizedChannel(code: String, inDeclaration: Boolean, scope: PaChaMap): Pair<String, List<MapperError>> {
+            val errors = ArrayList<MapperError>()
+            var offset = 0
+            var newCode = code
+            for (chan in chanDeclGrammar.findAll(code).map { it as Node }) {
+                if (!chan.children[8]!!.notBlank() && inDeclaration)
+                    continue // TODO: Forgot Semicolon
+
+                val typesStart = chan.children[1]!!.startPosition() + offset
+                val typesEnd = chan.children[4]!!.endPosition() + 1 + offset
+                val typesLength = typesEnd - typesStart + 1
+                newCode = newCode.replaceRange(typesStart, typesEnd, " ".repeat(typesLength))
+
+                for (type in listOf(chan.children[2]).plus((chan.children[3] as Node).children)) {
+
+                }
+
+                println("YO!")
+
+                // offset += replacement.length - defaultValueNode.length()
+            }
+
+            return Pair(newCode, errors)
+        }
+    }
+}
+
+
+class PaChaMapperOld {
     private val serializer: Serializer = Persister()
 
     private val chanDeclPattern = Regex("""chan\s*(\(\s*[^,()\s]+(?>\s*,\s*[^,()\s]+)*\s*\))(\s+|\s*&\s*)([^;&,()\[\]\s]+)\s*(\[\s*[^,;\[\]]+\])?;?""")

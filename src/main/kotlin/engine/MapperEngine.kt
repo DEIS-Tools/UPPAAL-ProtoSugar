@@ -2,7 +2,7 @@ package engine
 
 import engine.mapping.Mapper
 import engine.mapping.Phase
-import engine.mapping.Error
+import engine.mapping.MapperError
 import engine.mapping.PathNode
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
@@ -34,25 +34,24 @@ class MapperEngine(private val mappers: List<Mapper>) {
         }
     }
 
-    private fun runMappers(nta: Nta): List<Error> {
+    private fun runMappers(nta: Nta): List<MapperError> {
         // For each mapper -> for each mapper.phase -> phase
-        val errors = ArrayList<Error>()
+        val errors = ArrayList<MapperError>()
         for (mapper in mappers)
             for (phase in mapper.getPhases())
-                errors.addAll(visitNta(nta, listOf(PathNode(nta)), phase)) // TODO Break after first error(s)? (error severity)
+                errors.addAll(visitNta(nta, listOf(PathNode(nta)), phase)) // TODO Break after first error(s)? (or depending on error severity)
         return errors
     }
 
-    private fun visitNta(nta: Nta, path: List<PathNode>, phase: Phase): List<Error> =
+    private fun visitNta(nta: Nta, path: List<PathNode>, phase: Phase): List<MapperError> =
         phase.visit(path.plus(PathNode(nta.declaration)), nta.declaration)
             .plus(nta.templates.withIndex().flatMap
                 { (index, template) -> visitTemplate(template, path.plus(PathNode(template, index+1)), phase) }
             )
             .plus(phase.visit(path.plus(PathNode(nta.system)), nta.system))
-            // TODO Visit queries?
             .plus(phase.visit(path, nta))
 
-    private fun visitTemplate(template: Template, path: List<PathNode>, phase: Phase): List<Error> =
+    private fun visitTemplate(template: Template, path: List<PathNode>, phase: Phase): List<MapperError> =
         (template.parameter?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf())
             .plus((template.declaration?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf()))
             .plus(template.transitions?.let {
@@ -62,7 +61,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
             // TODO Visit states?
             .plus(phase.visit(path, template))
 
-    private fun visitTransition(transition: Transition, path: List<PathNode>, phase: Phase): List<Error> =
+    private fun visitTransition(transition: Transition, path: List<PathNode>, phase: Phase): List<MapperError> =
         phase.visit(path, transition)
     // TODO Visit labels?
 }
