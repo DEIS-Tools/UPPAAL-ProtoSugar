@@ -1,5 +1,7 @@
 package engine.mapping
 
+import engine.parsing.Confre
+import engine.parsing.Node
 import uppaal_pojo.*
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
@@ -52,14 +54,93 @@ class PathNode(val element: UppaalPojo, val index: Int? = null) {
     }
 }
 
-class UppaalError(pathList: List<PathNode>,
-                  val beginLine: Int, val beginColumn: Int,
-                  val endLine: Int, val endColumn: Int,
-                  val message: String, val context: String,
-                  val isUnrecoverable: Boolean) {
-    val path: String = pathList.joinToString("/")
+class UppaalError {
+    val path: String
+    val beginLine: Int
+    val beginColumn: Int
+    val endLine: Int
+    val endColumn: Int
+    val message: String
+    val context: String
+    val isUnrecoverable: Boolean
+
+    constructor(
+        pathList: List<PathNode>,
+        beginLine: Int,
+        beginColumn: Int,
+        endLine: Int,
+        endColumn: Int,
+        message: String,
+        context: String,
+        isUnrecoverable: Boolean
+    ) {
+        this.path = pathList.joinToString("/")
+        this.beginLine = beginLine
+        this.beginColumn = beginColumn
+        this.endLine = endLine
+        this.endColumn = endColumn
+        this.message = message
+        this.context = context
+        this.isUnrecoverable = isUnrecoverable
+    }
+
+    constructor(
+        path: String,
+        beginLine: Int,
+        beginColumn: Int,
+        endLine: Int,
+        endColumn: Int,
+        message: String,
+        context: String,
+        isUnrecoverable: Boolean
+    ) {
+        this.path = path
+        this.beginLine = beginLine
+        this.beginColumn = beginColumn
+        this.endLine = endLine
+        this.endColumn = endColumn
+        this.message = message
+        this.context = context
+        this.isUnrecoverable = isUnrecoverable
+    }
+
     override fun toString(): String {
         return """{"path":"$path","begln":$beginLine,"begcol":$beginColumn,"endln":$endLine,"endcol":$endColumn,"msg":"$message","ctx":"$context"}"""
+    }
+
+    companion object {
+        @JvmStatic
+        private val errorGrammar = Confre("""
+            INT = ([1-9][0-9]*)|0*
+            STRING = "((\\"|[^"\n])*(")?)?
+            
+            Error :== '{' '"path"'   ':' STRING ','
+                          '"begln"'  ':' INT    ','
+                          '"begcol"' ':' INT    ','
+                          '"endln"'  ':' INT    ','
+                          '"endcol"' ':' INT    ','
+                          '"msg"'    ':' STRING ','
+                          '"ctx"'    ':' STRING
+                      '}' .
+        """.trimIndent())
+
+        @JvmStatic
+        val startAndEndQuotePattern = Regex("""^.|.$""")
+
+        @JvmStatic
+        fun fromJson(json: String, isUnrecoverable: Boolean = true): UppaalError {
+            val errorTree = (errorGrammar.matchExact(json) as? Node) ?: throw Exception("Could not parse UppaalError from JSON: $json")
+            return UppaalError(
+                errorTree.children[3]!!.toString().replace(startAndEndQuotePattern, ""),
+                errorTree.children[7]!!.toString().toInt(),
+                errorTree.children[11]!!.toString().toInt(),
+                errorTree.children[15]!!.toString().toInt(),
+                errorTree.children[19]!!.toString().toInt(),
+                errorTree.children[23]!!.toString().replace(startAndEndQuotePattern, ""),
+                errorTree.children[27]!!.toString().replace(startAndEndQuotePattern, ""),
+                isUnrecoverable
+            )
+        }
     }
 }
 

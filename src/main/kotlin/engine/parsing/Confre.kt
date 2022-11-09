@@ -210,7 +210,7 @@ class Confre(grammar: String) {
                     value += char
                     nextChar()
                 }
-                while (!char.isWhitespace() && terminals.any { it.matches(value + char) }) {
+                while (char != nullChar && terminals.any { it.matches(value + char) }) {
                     value += char
                     nextChar()
                 }

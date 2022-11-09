@@ -111,23 +111,29 @@ fun runServer(server: String)
 
     var latestModelErrors: List<UppaalError>?
 
-    var buffer = ""
+    var toEngineBuffer = ""
     val modelCmdPrefix = "{\"cmd\":\"newXMLSystem3\",\"args\":\""
     val queryCmdPrefix = "{\"cmd\":\"modelCheck\",\"args\":\""
+
+    var toGuiBuffer = ""
+    val queryErrorResponsePrefix = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":"
+    val modelErrorResponsePrefix = "{\"res\":\"error\",\"info\":{\"errors\":" // Continues until "]}}"
+    val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warnings\":" // Continues until "]}}"
+
     while (true)
     {
-        if (toEngineInput.ready())
+        while (toEngineInput.ready())
         {
             val ch = toEngineInput.read()
-            if (buffer.isEmpty() && ch.toChar() != '{')
+            if (toEngineBuffer.isEmpty() && ch.toChar() != '{')
             {
                 toEngineOutput.write(ch)
                 toEngineOutput.flush()
                 continue
             }
 
-            buffer += ch.toChar()
-            if (buffer == modelCmdPrefix)
+            toEngineBuffer += ch.toChar()
+            if (toEngineBuffer == modelCmdPrefix)
             {
                 val modelResult = interceptModelCmd(toEngineInput)
                 @Suppress("LiftReturnOrAssignment")
@@ -141,9 +147,9 @@ fun runServer(server: String)
                     toEngineOutput.flush()
                     latestModelErrors = modelResult.second
                 }
-                buffer = ""
+                toEngineBuffer = ""
             }
-            else if (buffer == queryCmdPrefix)
+            else if (toEngineBuffer == queryCmdPrefix)
             {
                 val queryResult = interceptQueryCmd(toEngineInput)
                 if (null != queryResult.second) {
@@ -154,21 +160,56 @@ fun runServer(server: String)
                     toEngineOutput.write(generateQueryCommand(queryResult.first))
                     toEngineOutput.flush()
                 }
-                buffer = ""
+                toEngineBuffer = ""
             }
-            else if (!modelCmdPrefix.startsWith(buffer) && !queryCmdPrefix.startsWith(buffer))
+            else if (!modelCmdPrefix.startsWith(toEngineBuffer) && !queryCmdPrefix.startsWith(toEngineBuffer))
             {
-                toEngineOutput.write(buffer)
+                toEngineOutput.write(toEngineBuffer)
                 toEngineOutput.flush()
-                buffer = ""
+                toEngineBuffer = ""
             }
         }
 
-        // TODO: Intercept errors from UPPAAL engine and append own errors
-        if (toGuiInput.ready())
+        while (toGuiInput.ready())
         {
-            toGuiOutput.write(toGuiInput.read())
-            toGuiOutput.flush()
+            val ch = toGuiInput.read()
+
+            if (toGuiBuffer.isEmpty() && ch.toChar() != '{') {
+                toGuiOutput.write(ch)
+                toGuiOutput.flush()
+                continue
+            }
+
+            toGuiBuffer += ch.toChar()
+            if (toGuiBuffer == queryErrorResponsePrefix)
+            {
+                val queryError = interceptQueryErrorResponse(toGuiInput)
+                toGuiOutput.write(generateQueryErrorResponse(queryError))
+                toGuiOutput.flush()
+                toGuiBuffer = ""
+            }
+            else if (toGuiBuffer == modelErrorResponsePrefix)
+            {
+                // TODO: Fully implement
+                toGuiOutput.write(toGuiBuffer)
+                toGuiOutput.flush()
+                toGuiBuffer = ""
+            }
+            else if (toGuiBuffer == modelSuccessResponsePrefix)
+            {
+                // TODO: Fully implement
+                toGuiOutput.write(toGuiBuffer)
+                toGuiOutput.flush()
+                toGuiBuffer = ""
+            }
+            else if (!queryErrorResponsePrefix.startsWith(toGuiBuffer)
+                     && !modelErrorResponsePrefix.startsWith(toGuiBuffer)
+                     && !modelSuccessResponsePrefix.startsWith(toGuiBuffer))
+            {
+                toGuiOutput.write(toGuiBuffer)
+                toGuiOutput.flush()
+                toGuiBuffer = ""
+            }
         }
     }
 }
@@ -182,13 +223,10 @@ fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
 
     return engine.mapModel(originalModel.replace("\\\"", "\""))
 }
-
 fun generateModelCommand(model: String): String
     = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.replace("\"", "\\\"")}\"}"
-
 fun generateModelErrorResponse(errors: List<UppaalError>): String
     = "{\"res\":\"error\",\"info\":{\"errors\":[${errors.joinToString(",")}],\"warnings\":[]}}"
-
 
 fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
 {
@@ -202,10 +240,20 @@ fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
 
     return Pair(escapedQuery, result.second)
 }
-
 fun generateQueryCommand(query: String): String
     = "{\"cmd\":\"modelCheck\",\"args\":\"${query.replace("\"", "\\\"")}\"}"
+fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
+{
+    var error = ""
+    while (!error.endsWith("\"}") || error.endsWith("\\\"}"))
+        error += input.read().toChar()
 
+    var throwaway = ""
+    while (!throwaway.endsWith("\"trace\":null}}"))
+        throwaway += input.read().toChar()
+
+    return engine.mapQueryError(UppaalError.fromJson(error))
+}
 fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
 
