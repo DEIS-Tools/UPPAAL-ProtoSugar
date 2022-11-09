@@ -1,16 +1,14 @@
 package engine.mapping.txquan
 
-import engine.mapping.Mapper
-import engine.mapping.MapperError
-import engine.mapping.PathNode
-import engine.mapping.Phase
+import engine.mapping.*
 import engine.parsing.Confre
 import engine.parsing.Leaf
 
 class TxQuanMapper : Mapper {
-    override fun getPhases(): Sequence<Phase> = sequenceOf(Phase1())
+    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
+        = Pair(sequenceOf(), TxQuanQueryPhase())
 
-    private class Phase1 : Phase()
+    private class TxQuanQueryPhase : QueryPhase()
     {
         private val aBox = "INVARIABLY"
         private val eDiamond = "POSSIBLY"
@@ -46,33 +44,43 @@ class TxQuanMapper : Mapper {
                          | '<?' | '>?' | 'or' | 'and' | 'imply' .
         """.trimIndent())
 
-        init {
-            register(::mapQuery)
-        }
 
-        private fun mapQuery(@Suppress("UNUSED_PARAMETER") path: List<PathNode>, query: Query): List<MapperError> {
-            val queryTree = queryGrammar.matchExact(query.formula) ?: return listOf()
+        override fun mapQuery(query: String): Pair<String, UppaalError?> {
+            val queryTree = queryGrammar.matchExact(query) ?: return Pair(naiveMap(query), null)
+
             val textualQuantifiers = queryTree
                 .postOrderWalk()
                 .filterIsInstance<Leaf>()
                 .filter { isTextualQuantifier(it) }
 
-            var newFormula = query.formula
+            var newQuery = query
             var offset = 0
             for (txQuan in textualQuantifiers)
             {
                 val replacement = textualQuantifierStrings[txQuan.token!!.value]!!
-                newFormula = newFormula.replaceRange(txQuan.startPosition() + offset, txQuan.endPosition()+1 + offset, replacement)
+                newQuery = newQuery.replaceRange(txQuan.startPosition() + offset, txQuan.endPosition()+1 + offset, replacement)
                 offset += replacement.length - txQuan.length()
             }
 
-            query.formula = newFormula
-            return listOf()
+            return Pair(newQuery, null)
+        }
+
+        private fun naiveMap(query: String): String
+        {
+            var newQuery = query
+            for (kvp in textualQuantifierStrings)
+                newQuery = newQuery.replace(kvp.key, kvp.value)
+            return newQuery
         }
 
         private fun isTextualQuantifier(leaf: Leaf): Boolean {
             val value = leaf.token?.value ?: return false
             return textualQuantifierStrings.contains(value)
+        }
+
+
+        override fun mapQueryError(error: UppaalError): UppaalError {
+            TODO("Not yet implemented")
         }
     }
 }

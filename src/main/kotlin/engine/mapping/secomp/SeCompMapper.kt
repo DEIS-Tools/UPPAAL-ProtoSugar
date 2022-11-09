@@ -1,20 +1,18 @@
 package engine.mapping.secomp
 
-import engine.mapping.Mapper
-import engine.mapping.MapperError
-import engine.mapping.PathNode
-import engine.mapping.Phase
+import engine.mapping.*
 import uppaal_pojo.Template
 
 class SeCompMapper : Mapper {
-    override fun getPhases(): Sequence<Phase> = sequenceOf(Phase1())
+    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
+        = Pair(sequenceOf(Phase1()), null)
 
-    private class Phase1 : Phase() {
+    private class Phase1 : ModelPhase() {
         init {
             register(::mapTemplate)
         }
 
-        private fun mapTemplate(path: List<PathNode>, template: Template): List<MapperError> {
+        private fun mapTemplate(path: List<PathNode>, template: Template): List<UppaalError> {
             // TODO
             return listOf()
         }

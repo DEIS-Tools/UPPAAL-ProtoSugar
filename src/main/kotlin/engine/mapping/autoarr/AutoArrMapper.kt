@@ -6,9 +6,10 @@ import uppaal_pojo.Declaration
 import uppaal_pojo.System
 
 class AutoArrMapper : Mapper {
-    override fun getPhases(): Sequence<Phase> = sequenceOf(Phase1())
+    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
+        = Pair(sequenceOf(Phase1()), null)
 
-    private class Phase1 : Phase() {
+    private class Phase1 : ModelPhase() {
         private val arrayGrammar = Confre(
             """
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
@@ -30,20 +31,20 @@ class AutoArrMapper : Mapper {
             register(::mapSystem)
         }
 
-        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<MapperError> {
+        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
             val (newDecl, errors) = mapAutoArrayInstantiations(declaration.content, path)
             declaration.content = newDecl
             return errors
         }
 
-        private fun mapSystem(path: List<PathNode>, system: System): List<MapperError> {
+        private fun mapSystem(path: List<PathNode>, system: System): List<UppaalError> {
             val (newDecl, errors) = mapAutoArrayInstantiations(system.content, path)
             system.content = newDecl
             return errors
         }
 
-        private fun mapAutoArrayInstantiations(code: String, path: List<PathNode>): Pair<String, List<MapperError>> {
-            val errors = ArrayList<MapperError>()
+        private fun mapAutoArrayInstantiations(code: String, path: List<PathNode>): Pair<String, List<UppaalError>> {
+            val errors = ArrayList<UppaalError>()
             var offset = 0
             var newCode = code
             for (autoArr in arrayGrammar.findAll(code).map { it as Node }) {
@@ -59,7 +60,7 @@ class AutoArrMapper : Mapper {
                     .filter { it.first >= sizes.size }
                     .map { Pair(it.first, getStartAndEndLinesAndColumns(code, it.second, it.third)) }
                 for (dimRef in illegalDimRefs)
-                    errors.add(MapperError(
+                    errors.add(UppaalError(
                         path,
                         dimRef.second.first, dimRef.second.second,
                         dimRef.second.third, dimRef.second.fourth,

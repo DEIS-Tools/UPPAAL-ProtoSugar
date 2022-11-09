@@ -1,4 +1,5 @@
 import engine.MapperEngine
+import engine.mapping.UppaalError
 import engine.mapping.autoarr.AutoArrMapper
 import engine.mapping.pacha.PaChaMapper
 import engine.mapping.secomp.SeCompMapper
@@ -31,7 +32,7 @@ fun main(args: Array<String>)
     engine = MapperEngine(tags[MAPPERS_TAG]?.map { mappers[it]!! } ?: listOf())
 
     when {
-        tags.containsKey(FILE_TAG) -> runMapper(File(tags[FILE_TAG]!![0]), tags[OUTPUT_TAG]?.let { File(it[0]) })
+        tags.containsKey(FILE_TAG) -> runOnFile(File(tags[FILE_TAG]!![0]), tags[OUTPUT_TAG]?.let { File(it[0]) })
         tags.containsKey(SERVER_TAG) -> runServer(tags[SERVER_TAG]!![0])
         tags.containsKey(DEBUG_TAG) -> runDebug(tags[DEBUG_TAG]!![0], File(tags[DEBUG_TAG]!![1]), File(tags[DEBUG_TAG]!![2]), File(tags[DEBUG_TAG]!![3]))
         else -> usage()
@@ -76,72 +77,138 @@ fun getParams(argItr: Iterator<String>, count: Int): List<String>
     return params
 }
 
-fun runMapper(inputFile: File, outputFile: File?)
+
+fun runOnFile(inputFile: File, outputFile: File?)
 {
-    val result = engine.map(inputFile.inputStream())
-    if (outputFile == null)
-        print(result)
+    val modelResult = engine.mapModel(inputFile.inputStream())
+    if (modelResult.second.isNotEmpty()) {
+        print("There were errors:\n")
+        print(modelResult.second.joinToString("\n"))
+    }
+    else if (outputFile == null)
+        print(modelResult.first)
     else
         outputFile.outputStream().bufferedWriter().use {
-            it.write(result)
+            it.write(modelResult.first)
             it.flush()
             it.close()
         }
 }
 
+
 fun runServer(server: String)
 {
     val params = server.split(',').toTypedArray()
     val process = ProcessBuilder(*params)
-        .redirectOutput(Redirect.INHERIT)
         .redirectError(Redirect.INHERIT)
         .start()
 
-    val input = System.`in`.bufferedReader(StandardCharsets.UTF_8)
-    val output = process.outputStream.bufferedWriter(StandardCharsets.UTF_8)
+    val toEngineInput = System.`in`.bufferedReader(StandardCharsets.UTF_8)
+    val toEngineOutput = process.outputStream.bufferedWriter(StandardCharsets.UTF_8)
+
+    val toGuiInput = process.inputStream.bufferedReader(StandardCharsets.UTF_8)
+    val toGuiOutput = System.out.bufferedWriter(StandardCharsets.UTF_8)
+
+    var latestModelErrors: List<UppaalError>?
 
     var buffer = ""
-    val match = "{\"cmd\":\"newXMLSystem3\""
+    val modelCmdPrefix = "{\"cmd\":\"newXMLSystem3\",\"args\":\""
+    val queryCmdPrefix = "{\"cmd\":\"modelCheck\",\"args\":\""
     while (true)
     {
+        if (toEngineInput.ready())
+        {
+            val ch = toEngineInput.read()
+            if (buffer.isEmpty() && ch.toChar() != '{')
+            {
+                toEngineOutput.write(ch)
+                toEngineOutput.flush()
+                continue
+            }
+
+            buffer += ch.toChar()
+            if (buffer == modelCmdPrefix)
+            {
+                val modelResult = interceptModelCmd(toEngineInput)
+                @Suppress("LiftReturnOrAssignment")
+                if (modelResult.second.any { it.isUnrecoverable }) {
+                    toGuiOutput.write(generateModelErrorResponse(modelResult.second))
+                    toGuiOutput.flush()
+                    latestModelErrors = null
+                }
+                else {
+                    toEngineOutput.write(generateModelCommand(modelResult.first))
+                    toEngineOutput.flush()
+                    latestModelErrors = modelResult.second
+                }
+                buffer = ""
+            }
+            else if (buffer == queryCmdPrefix)
+            {
+                val queryResult = interceptQueryCmd(toEngineInput)
+                if (null != queryResult.second) {
+                    toGuiOutput.write(generateQueryErrorResponse(queryResult.second!!))
+                    toGuiOutput.flush()
+                }
+                else {
+                    toEngineOutput.write(generateQueryCommand(queryResult.first))
+                    toEngineOutput.flush()
+                }
+                buffer = ""
+            }
+            else if (!modelCmdPrefix.startsWith(buffer) && !queryCmdPrefix.startsWith(buffer))
+            {
+                toEngineOutput.write(buffer)
+                toEngineOutput.flush()
+                buffer = ""
+            }
+        }
+
         // TODO: Intercept errors from UPPAAL engine and append own errors
-
-        val ch = input.read()
-        if (buffer.isEmpty() && ch.toChar() != '{')
+        if (toGuiInput.ready())
         {
-            output.write(ch)
-            output.flush()
-            continue
-        }
-
-        buffer += ch.toChar()
-        if (buffer == match)
-        {
-            output.write(interceptXmlCmd(input))
-            output.flush()
-            buffer = ""
-        }
-        else if (!match.startsWith(buffer))
-        {
-            output.write(buffer)
-            output.flush()
-            buffer = ""
+            toGuiOutput.write(toGuiInput.read())
+            toGuiOutput.flush()
         }
     }
 }
 
-fun interceptXmlCmd(input: BufferedReader): String
+fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
 {
-    var originalModel = input.readLine()
-    originalModel = originalModel.substring(originalModel.indexOf("<?"))
+    var originalModel = ""
     while (!originalModel.endsWith("\"}") || originalModel.endsWith("\\\"}"))
         originalModel += input.read().toChar()
     originalModel = originalModel.removeSuffix("\"}")
 
-    val mappedModel = engine.map(originalModel.replace("\\\"", "\""))
-
-    return "{\"cmd\":\"newXMLSystem3\",\"args\":\"${mappedModel.replace("\"", "\\\"")}\"}"
+    return engine.mapModel(originalModel.replace("\\\"", "\""))
 }
+
+fun generateModelCommand(model: String): String
+    = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.replace("\"", "\\\"")}\"}"
+
+fun generateModelErrorResponse(errors: List<UppaalError>): String
+    = "{\"res\":\"error\",\"info\":{\"errors\":[${errors.joinToString(",")}],\"warnings\":[]}}"
+
+
+fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
+{
+    var query = ""
+    while (!query.endsWith("\"}") || query.endsWith("\\\"}"))
+        query += input.read().toChar()
+    query = query.removeSuffix("\"}")
+
+    val result = engine.mapQuery(query.replace("\\\"", "\""))
+    val escapedQuery = result.first.replace("\"", "\\\"")
+
+    return Pair(escapedQuery, result.second)
+}
+
+fun generateQueryCommand(query: String): String
+    = "{\"cmd\":\"modelCheck\",\"args\":\"${query.replace("\"", "\\\"")}\"}"
+
+fun generateQueryErrorResponse(error: UppaalError): String
+    = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
+
 
 fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
 {
@@ -193,6 +260,7 @@ fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
         }
     }
 }
+
 
 fun usage()
 {

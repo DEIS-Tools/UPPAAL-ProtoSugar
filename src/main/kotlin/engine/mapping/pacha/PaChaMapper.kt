@@ -1,9 +1,6 @@
 package engine.mapping.pacha
 
-import engine.mapping.MapperError
-import engine.mapping.Mapper
-import engine.mapping.PathNode
-import engine.mapping.Phase
+import engine.mapping.*
 import engine.parsing.Confre
 import engine.parsing.Node
 import org.simpleframework.xml.Serializer
@@ -17,9 +14,10 @@ import java.util.LinkedList
 class PaChaMap : HashMap<String, LinkedList<String>>()
 
 class PaChaMapper : Mapper {
-    override fun getPhases(): Sequence<Phase> = sequenceOf(Phase1())
+    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
+        = Pair(sequenceOf(Phase1()), null)
 
-    private class Phase1 : Phase()
+    private class Phase1 : ModelPhase()
     {
         val globalPaChas = PaChaMap()
         val templatePaChaMaps: HashMap<String, PaChaMap> = HashMap()
@@ -38,15 +36,15 @@ class PaChaMapper : Mapper {
             //register(::mapSystem)
         }
 
-        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<MapperError> {
+        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
             val (newContent, errors) = mapParameterizedChannel(declaration.content, true, globalPaChas) // TODO FIX last param
             declaration.content = newContent
             return errors
         }
 
 
-        private fun mapParameterizedChannel(code: String, inDeclaration: Boolean, scope: PaChaMap): Pair<String, List<MapperError>> {
-            val errors = ArrayList<MapperError>()
+        private fun mapParameterizedChannel(code: String, inDeclaration: Boolean, scope: PaChaMap): Pair<String, List<UppaalError>> {
+            val errors = ArrayList<UppaalError>()
             var offset = 0
             var newCode = code
             for (chan in chanDeclGrammar.findAll(code).map { it as Node }) {
