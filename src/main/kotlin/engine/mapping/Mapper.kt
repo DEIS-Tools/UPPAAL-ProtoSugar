@@ -112,7 +112,7 @@ class UppaalError {
         @JvmStatic
         private val errorGrammar = Confre("""
             INT = ([1-9][0-9]*)|0*
-            STRING = "((\\"|[^"\n])*(")?)?
+            STRING = "((\\.|[^\\"\n])*(")?)?
             
             Error :== '{' '"path"'   ':' STRING ','
                           '"begln"'  ':' INT    ','
@@ -125,7 +125,7 @@ class UppaalError {
         """.trimIndent())
 
         @JvmStatic
-        val startAndEndQuotePattern = Regex("""^.|.$""")
+        private val startAndEndQuotePattern = Regex("""^.|.$""")
 
         @JvmStatic
         fun fromJson(json: String, isUnrecoverable: Boolean = true): UppaalError {

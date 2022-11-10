@@ -206,7 +206,7 @@ class Confre(grammar: String) {
                 columnStart = column
 
                 value = ""
-                while (!char.isWhitespace() && terminals.none { it.matches(value + char) }) {
+                while (!(char.isWhitespace() || char == nullChar) && terminals.none { it.matches(value + char) }) {
                     value += char
                     nextChar()
                 }

@@ -26,7 +26,7 @@ class TxQuanMapper : Mapper {
 
         private val queryGrammar = Confre("""
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = ([1-9][0-9]*)|0*
+            INT = -?[0-9]+
             BOOL = true|false
             
             Query :== [Quantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .

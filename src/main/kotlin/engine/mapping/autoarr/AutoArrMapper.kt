@@ -13,7 +13,7 @@ class AutoArrMapper : Mapper {
         private val constIntGrammar = Confre(
             """
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = [0-9]+
+            INT = -?[0-9]+
             
             ConstInt  :== 'const' 'int' IDENT '=' INT ';' .
         """.trimIndent())
@@ -21,7 +21,7 @@ class AutoArrMapper : Mapper {
         private val arrayGrammar = Confre(
             """
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = [0-9]+
+            INT = -?[0-9]+
             BOOL = true|false
             
             AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' (INT | IDENT) ']'} '=' '{' Expression '}' ';' .
@@ -80,7 +80,7 @@ class AutoArrMapper : Mapper {
                         path,
                         linesAndColumns.first, linesAndColumns.second,
                         linesAndColumns.third, linesAndColumns.fourth,
-                        "AutoArr cannot determine/use the sizes of some of these dimensions. Only positive integers and constant integer variables with explicitly given values are supported",
+                        "AutoArr cannot determine/use the sizes of some of the dimensions in '${code.substring(autoArr.startPosition(), autoArr.endPosition() + 1)}'. Only positive integers and constant integer variables with explicitly given values are supported",
                         "",
                         isUnrecoverable = false
                     ))

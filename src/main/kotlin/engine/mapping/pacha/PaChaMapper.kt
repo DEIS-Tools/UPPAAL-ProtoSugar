@@ -24,7 +24,7 @@ class PaChaMapper : Mapper {
 
         private val chanDeclGrammar = Confre("""
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = ([1-9][0-9]*)|0*
+            INT = -?[0-9]+
 
             ChanDecl :== 'chan' '(' Type {',' Type} ')' ['&'] IDENT {Array} [';'] .
             Type     :== ['&'] ('chan' ['(' Type ')'] | 'int' | 'bool') {Array} .

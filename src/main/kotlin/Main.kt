@@ -4,6 +4,8 @@ import engine.mapping.autoarr.AutoArrMapper
 import engine.mapping.pacha.PaChaMapper
 import engine.mapping.secomp.SeCompMapper
 import engine.mapping.txquan.TxQuanMapper
+import engine.parsing.Confre
+import engine.parsing.Node
 import java.io.*
 import java.lang.ProcessBuilder.Redirect
 import java.nio.charset.StandardCharsets
@@ -25,6 +27,21 @@ val mappers = mapOf(
     //Pair("Hiera", null)
 )
 lateinit var engine: MapperEngine
+
+val errorListGrammar = Confre("""
+            INT = ([1-9][0-9]*)|0*
+            STRING = "((\\.|[^\\"\n])*(")?)?
+            
+            ErrorList :== '[' Error { ',' Error } ']' .
+            Error :== '{' '"path"'   ':' STRING ','
+                          '"begln"'  ':' INT    ','
+                          '"begcol"' ':' INT    ','
+                          '"endln"'  ':' INT    ','
+                          '"endcol"' ':' INT    ','
+                          '"msg"'    ':' STRING ','
+                          '"ctx"'    ':' STRING
+                      '}' .
+        """.trimIndent())
 
 fun main(args: Array<String>)
 {
@@ -109,7 +126,7 @@ fun runServer(server: String)
     val toGuiInput = process.inputStream.bufferedReader(StandardCharsets.UTF_8)
     val toGuiOutput = System.out.bufferedWriter(StandardCharsets.UTF_8)
 
-    var latestModelErrors: List<UppaalError>?
+    var latestModelErrors: List<UppaalError>? = null
 
     var toEngineBuffer = ""
     val modelCmdPrefix = "{\"cmd\":\"newXMLSystem3\",\"args\":\""
@@ -145,7 +162,7 @@ fun runServer(server: String)
                 else {
                     toEngineOutput.write(generateModelCommand(modelResult.first))
                     toEngineOutput.flush()
-                    latestModelErrors = modelResult.second
+                    latestModelErrors = modelResult.second.ifEmpty { null }
                 }
                 toEngineBuffer = ""
             }
@@ -190,17 +207,23 @@ fun runServer(server: String)
             }
             else if (toGuiBuffer == modelErrorResponsePrefix)
             {
-                // TODO: Fully implement
-                toGuiOutput.write(toGuiBuffer)
+                val finalErrors = interceptModelErrorResponse(toGuiInput, latestModelErrors ?: listOf())
+                toGuiOutput.write(generateModelErrorResponse(finalErrors))
                 toGuiOutput.flush()
                 toGuiBuffer = ""
+                latestModelErrors = null
             }
             else if (toGuiBuffer == modelSuccessResponsePrefix)
             {
-                // TODO: Fully implement
-                toGuiOutput.write(toGuiBuffer)
+                if (latestModelErrors == null)
+                    toGuiOutput.write(toGuiBuffer)
+                else {
+                    interceptModelSuccessResponse(toGuiInput)
+                    toGuiOutput.write(generateModelErrorResponse(latestModelErrors))
+                }
                 toGuiOutput.flush()
                 toGuiBuffer = ""
+                latestModelErrors = null
             }
             else if (!queryErrorResponsePrefix.startsWith(toGuiBuffer)
                      && !modelErrorResponsePrefix.startsWith(toGuiBuffer)
@@ -225,6 +248,34 @@ fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
 }
 fun generateModelCommand(model: String): String
     = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.replace("\"", "\\\"")}\"}"
+fun interceptModelErrorResponse(input: BufferedReader, generatedErrors: List<UppaalError>): List<UppaalError>
+{
+    var errors = ""
+    while (!errors.endsWith("}]") && !errors.endsWith("\\}]")) // ']' marks end of error list
+        errors += input.read().toChar()
+
+    var throwaway = ""
+    while (!throwaway.endsWith("]}}")) // Marks end after warning-list and two object ends
+        throwaway += input.read().toChar()
+
+    // TODO: Instead, put through a "Model Error Mapper" (remember to pass generatedErrors)
+    val errorsTree = errorListGrammar.matchExact(errors) as Node;
+    val errorJsonList =
+        listOf(errorsTree.children[1].toString()) // First error
+            .plus( // For each child in multiple, for the second child in each of these, get string.
+                (errorsTree.children[2] as Node).children.map { (it as Node).children[1].toString() }
+            )
+    return errorJsonList
+        .map { UppaalError.fromJson(it) }
+        .plus(generatedErrors)
+        .toList()
+}
+fun interceptModelSuccessResponse(input: BufferedReader)
+{
+    var throwaway = ""
+    while (!throwaway.endsWith("]}}")) // Marks end after warning-list and two object ends
+        throwaway += input.read().toChar()
+}
 fun generateModelErrorResponse(errors: List<UppaalError>): String
     = "{\"res\":\"error\",\"info\":{\"errors\":[${errors.joinToString(",")}],\"warnings\":[]}}"
 
