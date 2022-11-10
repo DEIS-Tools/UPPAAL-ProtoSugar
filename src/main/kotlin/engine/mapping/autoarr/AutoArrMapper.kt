@@ -10,20 +10,26 @@ class AutoArrMapper : Mapper {
         = Pair(sequenceOf(Phase1()), null)
 
     private class Phase1 : ModelPhase() {
+        private val constIntGrammar = Confre(
+            """
+            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
+            INT = [0-9]+
+            
+            ConstInt  :== 'const' 'int' IDENT '=' INT ';' .
+        """.trimIndent())
+
         private val arrayGrammar = Confre(
             """
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = ([1-9][0-9]*)|0*
+            INT = [0-9]+
             BOOL = true|false
             
-            AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' INT ']'} '=' '{' Expression '}' ';' .
-            Expression :== [Unary] (Term  ['[' Expression ']'] | '(' Expression ')') [Binary Expression].
+            AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' (INT | IDENT) ']'} '=' '{' Expression '}' ';' .
+            Expression :== [Unary] (Term  {'[' Expression ']'} | '(' Expression ')') [Binary Expression].
             Term       :== IDENT | INT | BOOL .
             Unary      :== '+' | '-' | '!' | 'not' .
-            Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>'
-                         | '+' | '-' | '*' | '/' | '%' | '&'
-                         | '|' | '^' | '<<' | '>>' | '&&' | '||'
-                         | '<?' | '>?' | 'or' | 'and' | 'imply' .
+            Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
+                         | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
         """.trimIndent())
 
         init {
@@ -47,12 +53,42 @@ class AutoArrMapper : Mapper {
             val errors = ArrayList<UppaalError>()
             var offset = 0
             var newCode = code
+
+            // TODO: Allow constant ARRAY-variables as size parameter? Constants that are computable?
+
+            val constInts = ArrayList<Triple<IntRange, String, Int>>()
+            for (constInt in constIntGrammar.findAll(code).map { it as Node }) {
+                val range = IntRange(constInt.startPosition(), constInt.endPosition())
+                val name = constInt.children[2]!!.toString()
+                val value = constInt.children[4]!!.toString().toInt()
+                constInts.add(Triple(range, name, value))
+            }
+
             for (autoArr in arrayGrammar.findAll(code).map { it as Node }) {
-                val sizes = (autoArr.children[2] as Node).children.map { (it as Node).children[1].toString().toIntOrNull() }
+                val sizes = (autoArr.children[2] as Node).children.map {
+                    (it as Node).children[1].toString().toIntOrNull()
+                    ?: constInts.find { const ->
+                           const.second == it.children[1].toString()
+                           && const.first.last < autoArr.startPosition()
+                       }?.third
+                }
+                if (sizes.isEmpty() || sizes.any { it == null || it < 0 }) {
+                    val linesAndColumns = getStartAndEndLinesAndColumns(
+                        code, IntRange(autoArr.children[2]!!.startPosition(), autoArr.children[2]!!.endPosition()), 0
+                    )
+                    errors.add(UppaalError(
+                        path,
+                        linesAndColumns.first, linesAndColumns.second,
+                        linesAndColumns.third, linesAndColumns.fourth,
+                        "AutoArr cannot determine/use the sizes of some of these dimensions. Only positive integers and constant integer variables with explicitly given values are supported",
+                        "",
+                        isUnrecoverable = false
+                    ))
+                    continue
+                }
+
                 val defaultValueNode = autoArr.children[5]!!
                 val defaultValue = code.substring(defaultValueNode.startPosition(), defaultValueNode.endPosition() + 1)
-                if (sizes.isEmpty() || sizes.any { it == null || it < 0 })
-                    continue // Native UPPAAL engine will catch this
 
                 val anyDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)(i\s*\[\s*([0-9]+)\s*\])""")
                 val illegalDimRefs = anyDimPattern.findAll(defaultValue)
@@ -78,8 +114,6 @@ class AutoArrMapper : Mapper {
                 offset += replacement.length - defaultValueNode.length()
             }
 
-            // TODO: Allow constant variables as size parameter + detect errors
-
             return Pair(newCode, errors)
         }
 
@@ -87,9 +121,9 @@ class AutoArrMapper : Mapper {
             val singleDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)(i)(?>[^_a-zA-Z0-9\[]|$)""")
             val multiDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)(i\s*\[\s*($currDim)\s*\])""")
 
-            var newValue = multiDimPattern.replace(value) { it.value.replace(it.groups[1]!!.value, index.toString()) }
+            var newValue = multiDimPattern.replace(value) { it.value.replaceFirst(it.groups[1]!!.value, index.toString()) }
             if (dimensionCount == 1)
-                newValue = singleDimPattern.replace(newValue) { it.value.replace("i", index.toString()) }
+                newValue = singleDimPattern.replace(newValue) { it.value.replaceFirst("i", index.toString()) }
 
             return newValue
         }

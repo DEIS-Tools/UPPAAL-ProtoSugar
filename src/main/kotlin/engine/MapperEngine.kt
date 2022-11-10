@@ -18,20 +18,20 @@ class MapperEngine(private val mappers: List<Mapper>) {
     private var queryPhases: List<QueryPhase>? = null
 
     fun mapModel(stream: InputStream): Pair<String, List<UppaalError>> = stream.bufferedReader().use { return mapModel(it.readText()) }
-    @Suppress("MemberVisibilityCanBePrivate")
+
     fun mapModel(uppaalXml: String): Pair<String, List<UppaalError>> {
         val beforeNtaText = uppaalXml.substringBefore("<nta>")
         val ntaText = uppaalXml.substring(uppaalXml.indexOf("<nta>"))
 
         val nta = serializer.read(Nta::class.java, ntaText)
         val errors = runModelMappers(nta)
-        if (errors.isNotEmpty())
-            return Pair("", errors)
+        if (errors.any { it.isUnrecoverable })
+            return Pair(uppaalXml, errors)
 
         StringWriter().use {
             serializer.write(nta, it)
             val newModel = beforeNtaText + it.buffer.toString();
-            return Pair(newModel, listOf())
+            return Pair(newModel, errors)
         }
     }
 

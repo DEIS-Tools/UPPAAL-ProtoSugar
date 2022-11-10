@@ -116,9 +116,9 @@ fun runServer(server: String)
     val queryCmdPrefix = "{\"cmd\":\"modelCheck\",\"args\":\""
 
     var toGuiBuffer = ""
-    val queryErrorResponsePrefix = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":"
-    val modelErrorResponsePrefix = "{\"res\":\"error\",\"info\":{\"errors\":" // Continues until "]}}"
-    val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warnings\":" // Continues until "]}}"
+    val queryErrorResponsePrefix = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":" // Continues until: "trace":null}}
+    val modelErrorResponsePrefix = "{\"res\":\"error\",\"info\":{\"errors\":" // Continues until: ]}}
+    val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warnings\":" // Continues until: ]}}
 
     while (true)
     {

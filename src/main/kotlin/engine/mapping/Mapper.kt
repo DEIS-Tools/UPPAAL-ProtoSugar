@@ -56,12 +56,12 @@ class PathNode(val element: UppaalPojo, val index: Int? = null) {
 
 class UppaalError {
     val path: String
-    val beginLine: Int
-    val beginColumn: Int
-    val endLine: Int
-    val endColumn: Int
+    var beginLine: Int
+    var beginColumn: Int
+    var endLine: Int
+    var endColumn: Int
     val message: String
-    val context: String
+    var context: String
     val isUnrecoverable: Boolean
 
     constructor(
@@ -145,10 +145,10 @@ class UppaalError {
 }
 
 /** This is defined alongside the "UppaalError" class to help generate the start/end line/column values needed for errors **/
-fun getStartAndEndLinesAndColumns(text: String, range: IntRange, offset: Int): Quadruple<Int, Int, Int, Int>
+fun getStartAndEndLinesAndColumns(text: String, range: IntRange, rangeOffset: Int): Quadruple<Int, Int, Int, Int>
 {
-    val trueStart = range.first + offset // Inclusive
-    val trueEnd = range.last + offset // Inclusive
+    val trueStart = range.first + rangeOffset // Inclusive
+    val trueEnd = range.last + rangeOffset // Inclusive
 
     var lineStart = -1
     var columnStart = -1
@@ -170,14 +170,41 @@ fun getStartAndEndLinesAndColumns(text: String, range: IntRange, offset: Int): Q
         }
 
         if (currentIndex == trueEnd)
-            return Quadruple(lineStart, currentLine, columnStart, currentColumn)
+            return Quadruple(lineStart, columnStart, currentLine, currentColumn + 1) // Convert ot exclusive column end
 
         if (char == '\n') {
             ++currentLine
             currentColumn = 0
         }
     }
+}
 
+
+fun getRangeFromLinesAndColumns(text: String, lineStart: Int, columnStart: Int, lineEnd: Int, columnEnd: Int): IntRange
+{
+    var startIndex = -1
+    var currentLine = 1
+    var currentColumn = 0
+    var currentIndex = -1
+
+    val chars = text.asSequence().iterator()
+    while (true)
+    {
+        val char = chars.next()
+        ++currentIndex
+        ++currentColumn
+
+        if (currentLine == lineStart && currentColumn == columnStart)
+            startIndex = currentIndex
+
+        if (currentLine == lineEnd && currentColumn == columnEnd - 1)
+            return IntRange(startIndex, currentIndex) // Convert to inclusive end
+
+        if (char == '\n') {
+            ++currentLine
+            currentColumn = 0
+        }
+    }
 }
 
 data class Quadruple<A,B,C,D>(var first: A, var second: B, var third: C, var fourth: D) {
