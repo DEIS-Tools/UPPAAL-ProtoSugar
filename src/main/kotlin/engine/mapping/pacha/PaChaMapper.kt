@@ -3,6 +3,7 @@ package engine.mapping.pacha
 import engine.mapping.*
 import engine.parsing.Confre
 import engine.parsing.Node
+import engine.parsing.ParseTree
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
 import uppaal_pojo.*
@@ -11,7 +12,8 @@ import java.io.StringWriter
 import java.util.LinkedList
 
 
-class PaChaMap : HashMap<String, LinkedList<String>>()
+data class PaChaInfo(val numParameters: Int, val numDimensions: Int)
+class PaChaMap : HashMap<String, PaChaInfo>()
 
 class PaChaMapper : Mapper {
     override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
@@ -19,53 +21,186 @@ class PaChaMapper : Mapper {
 
     private class Phase1 : ModelPhase()
     {
-        val globalPaChas = PaChaMap()
-        val templatePaChaMaps: HashMap<String, PaChaMap> = HashMap()
+        private val PARAMETER_TYPE_HINT = "PARAM_TYPE"
+        private val backMaps = HashMap<Quadruple<Int, Int, Int, Int>, Pair<Quadruple<Int, Int, Int, Int>, String>>()
+        private val paChaMaps: HashMap<String?, PaChaMap> = hashMapOf(Pair(null, PaChaMap()))
+
 
         private val chanDeclGrammar = Confre("""
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
             INT = -?[0-9]+
 
-            ChanDecl :== 'chan' '(' Type {',' Type} ')' ['&'] IDENT {Array} [';'] .
-            Type     :== ['&'] ('chan' ['(' Type ')'] | 'int' | 'bool') {Array} .
-            Array    :== '[' (INT | IDENT) ']' .
+            ChanDecl :== IDENT TypeList ['&'] IDENT {Array} [';'] .
+            Type     :== ['&'] IDENT [TypeList] {Array} .
+            TypeList :== '(' [Type] {',' [Type]} ')' .
+            Array    :== '[' [INT | IDENT] ']' .
         """.trimIndent())
 
+        private val paChaUseGrammar = Confre("""
+            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
+
+            ChanDecl :== IDENT '(' [['meta'] IDENT] {',' [['meta'] IDENT]} ')' ('!' | '?') .
+        """.trimIndent())
+
+
         init {
+            register(::registerTemplatePaChaMap)
+
             register(::mapDeclaration)
-            //register(::mapSystem)
+            register(::mapParameter)
+            // map transitions
+            register(::mapSystem)
         }
 
+
+        private fun registerTemplatePaChaMap(path: List<PathNode>, template: Template): List<UppaalError> {
+            paChaMaps[
+                template.name ?: return listOf(UppaalError(path, 1,1,1,1, "Template has no name.", "", isUnrecoverable = true))
+            ] = PaChaMap()
+            return listOf()
+        }
+
+
         private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
-            val (newContent, errors) = mapParameterizedChannel(declaration.content, true, globalPaChas) // TODO FIX last param
+            val parent = path.takeLast(2).first().element
+            val paChaMap = paChaMaps[(parent as? Template)?.name]!!
+
+            val (newContent, errors) = mapPaChaDeclarations(path, declaration.content, paChaMap)
             declaration.content = newContent
             return errors
         }
 
+        private fun mapSystem(path: List<PathNode>, system: System): List<UppaalError> {
+            val (newContent, errors) = mapPaChaDeclarations(path, system.content, paChaMaps[null]!!)
+            system.content = newContent
+            return errors
+        }
 
-        private fun mapParameterizedChannel(code: String, inDeclaration: Boolean, scope: PaChaMap): Pair<String, List<UppaalError>> {
+        private fun mapParameter(path: List<PathNode>, parameter: Parameter): List<UppaalError> {
+            val template = path.takeLast(2).first().element as Template
+            val paChaMap = paChaMaps[template.name]!!
+
+            val (newContent, errors) = mapPaChaDeclarations(path, parameter.content, paChaMap)
+            parameter.content = newContent
+            return errors
+        }
+
+
+        private fun mapPaChaDeclarations(path: List<PathNode>, code: String, scope: PaChaMap): Pair<String, List<UppaalError>> {
+            val inDeclarationOrSystem = path.last().element !is Parameter // In "system/declaration" or in "parameter"
             val errors = ArrayList<UppaalError>()
             var offset = 0
             var newCode = code
-            for (chan in chanDeclGrammar.findAll(code).map { it as Node }) {
-                if (!chan.children[8]!!.notBlank() && inDeclaration)
-                    continue // TODO: Forgot Semicolon
+            for (chan in chanDeclGrammar.findAll(code).map { it as Node }.filter { isPaChaDecl(path, code, it, errors) }) {
+                val forgotSemicolon = inDeclarationOrSystem && checkSemicolon(path, code, chan, errors)
+                val chanName = chan.children[3]!!.toString()
 
-                val typesStart = chan.children[1]!!.startPosition() + offset
-                val typesEnd = chan.children[4]!!.endPosition() + 1 + offset
-                val typesLength = typesEnd - typesStart + 1
-                newCode = newCode.replaceRange(typesStart, typesEnd, " ".repeat(typesLength))
+                // Parse and remove type list
+                val typeListNode = chan.children[1] as Node
+                val typeNodes = listOf(typeListNode.children[1] as Node)
+                    .plus((typeListNode.children[2] as Node).children.map { (it as Node).children[1] as Node })
+                val typeErrors = checkTypes(path, code, typeNodes, typeListNode.range())
+                errors.addAll(typeErrors)
 
-                for (type in listOf(chan.children[2]).plus((chan.children[3] as Node).children)) {
+                val typesStart = typeListNode.startPosition() + offset
+                val typesEnd = typeListNode.endPosition() + 1 + offset
+                newCode = newCode.replaceRange(typesStart, typesEnd, " ".repeat(typesEnd - typesStart))
 
+                // Generate parameter meta-variables
+                if (typeErrors.isEmpty()) {
+                    var insertPosition = chan.endPosition() + 1 + offset
+                    if (forgotSemicolon) {
+                        newCode = newCode.replaceRange(insertPosition, insertPosition, ";")
+                        ++insertPosition
+                    }
+
+                    for (pair in typeNodes.map { it.children[0] as Node }.withIndex()) {
+                        val typeName = pair.value.children[1]!!.toString()
+                        val array = pair.value.children[3]!!.toString().replace(" ", "")
+
+                        // Add the parameter variable declaration
+                        val parameterVariableDecl =
+                            if (inDeclarationOrSystem)
+                                " meta $typeName __${chanName}_p${pair.index+1}${array};"
+                            else
+                                ", $typeName __${chanName}_p${pair.index+1}${array}"
+                        newCode = newCode.replaceRange(insertPosition, insertPosition, parameterVariableDecl)
+
+                        // To map "unknown type" errors back to new syntax
+                        val newLinesAndColumns =
+                            if (inDeclarationOrSystem)
+                                getLinesAndColumnsFromRange(newCode, IntRange(insertPosition+6, insertPosition+6 + typeName.length-1))
+                            else
+                                getLinesAndColumnsFromRange(newCode, IntRange(insertPosition+2, insertPosition+2 + typeName.length-1))
+                        backMaps[newLinesAndColumns] = Pair(getLinesAndColumnsFromRange(code, pair.value.range()), PARAMETER_TYPE_HINT)
+
+                        // Update
+                        offset += parameterVariableDecl.length
+                        insertPosition += parameterVariableDecl.length
+                    }
                 }
 
-                println("YO!")
-
-                // offset += replacement.length - defaultValueNode.length()
+                val numTypes = if (typeErrors.isEmpty()) typeNodes.size else -1 // "-1" means "mapper ignore for now"
+                val numDimensions = (chan.children[4] as Node).children.size
+                scope[chanName] = PaChaInfo(numTypes, numDimensions)
             }
 
             return Pair(newCode, errors)
+        }
+
+        private fun isPaChaDecl(path: List<PathNode>, code: String, decl: Node, errors: ArrayList<UppaalError>): Boolean {
+            val nameNode = decl.children[0]!!
+            val typeListNode = decl.children[1]!!
+            if (nameNode.toString() == "chan")
+                return true
+            else if (typeListNode.isNotBlank())
+                errors.add(createUppaalError(path, code, typeListNode, "Only the 'chan' type can have a parameter-type-list."))
+
+            return false
+        }
+
+        private fun checkSemicolon(path: List<PathNode>, code: String, chan: Node, errors: ArrayList<UppaalError>): Boolean {
+            if (chan.children[5]!!.isBlank()) {
+                errors.add(createUppaalError(path, code, chan, "Missing semicolon after channel declaration."))
+                return true
+            }
+            return false
+        }
+
+        private fun checkTypes(path: List<PathNode>, originalCode: String, types: List<Node>, typeListRange: IntRange): List<UppaalError> {
+            val errors = ArrayList<UppaalError>()
+            for (type in types.map { it.children[0] as? Node })
+                if (type == null || type.isBlank())
+                    errors.add(createUppaalError(path, originalCode, typeListRange, "Blank type in type list of parameterised channel"))
+                else {
+                    if (type.children[0]?.isNotBlank() == true)
+                        errors.add(createUppaalError(path, originalCode, type.children[0]!!, "A parameterized channel cannot have reference parameters."))
+
+                    // Check if parameter-type is itself a channel (which is illegal without the "channel reference" mapper)
+                    if (type.children[1]!!.toString() == "chan")
+                        errors.add(createUppaalError(path, originalCode, type, "Parameterized channels do not support channel-type parameters."))
+                    else if (type.children[2]?.isNotBlank() == true)
+                        errors.add(createUppaalError(path, originalCode, type.children[2]!!, "Only the 'chan' type can have a parameter-type-list. Also, parameterized channels do not support channel-type parameters."))
+                }
+            return errors
+        }
+
+
+        override fun mapModelErrors(errors: List<UppaalError>): List<UppaalError> {
+            for (error in errors.filter { it.fromEngine }) {
+                val linesAndColumns = Quadruple(error.beginLine, error.beginColumn, error.endLine, error.endColumn)
+                val backMap = backMaps[linesAndColumns] ?: continue
+                if (backMap.second == PARAMETER_TYPE_HINT) {
+                    error.beginLine = backMap.first.first
+                    error.beginColumn = backMap.first.second
+                    error.endLine = backMap.first.third
+                    error.endColumn = backMap.first.fourth
+                    error.message = "Unknown type name in channel parameter."
+                }
+                else
+                    throw Exception("Unhandled error type in PaChaMapper: ${backMap.second}")
+            }
+            return errors
         }
     }
 }
@@ -131,7 +266,7 @@ class PaChaMapperOld {
                 //params.add(ChannelParameter(baseType, arrayType))
             }
 
-            paChas[chanName] = params
+            //paChas[chanName] = params
             newDeclarations = newDeclarations.replaceFirst(match.value, newDecl)
         }
 
@@ -177,7 +312,7 @@ class PaChaMapperOld {
                 //params.add(ChannelParameter(baseType, arrayType))
             }
 
-            templatePaChas[chanName] = params
+            //templatePaChas[chanName] = params
             newParameters = newParameters.replaceFirst(match.value, newParam)
         }
 
@@ -209,8 +344,8 @@ class PaChaMapperOld {
             return
 
         val expressions = extractExpressions(params).toMutableList()
-        if (expressions.size != (templatePaChas[chanName]?.size ?: globalPaChas[chanName]?.size ?: -1))
-            throw Exception("Channel '$chanName' used with wrong number of parameters in '${shout.groups[0]!!.value}'")
+        //if (expressions.size != (templatePaChas[chanName]?.size ?: globalPaChas[chanName]?.size ?: -1))
+        //    throw Exception("Channel '$chanName' used with wrong number of parameters in '${shout.groups[0]!!.value}'")
 
         sync.content = "$chanName$subscript!"
         update.content = expressions.withIndex().joinToString(
@@ -256,8 +391,8 @@ class PaChaMapperOld {
         val malformedVars = variables.filter { !varPattern.matches(it) }
         if (malformedVars.isNotEmpty())
             throw Exception("Malformed parameters in '${listen.groups[0]!!.value}'. See: '${malformedVars.joinToString(", ")}'")
-        if (variables.size != (templatePaChas[chanName]?.size ?: globalPaChas[chanName]?.size ?: -1))
-            throw Exception("Channel '$chanName' used with wrong number of parameters in '${listen.groups[0]!!.value}'")
+        //if (variables.size != (templatePaChas[chanName]?.size ?: globalPaChas[chanName]?.size ?: -1))
+        //    throw Exception("Channel '$chanName' used with wrong number of parameters in '${listen.groups[0]!!.value}'")
 
         val (metaVars, nonMetaVars) = variables.withIndex().partition { it.value.startsWith("meta") }
         var metaMappedUpdate = originalUpdate
@@ -288,9 +423,9 @@ class PaChaMapperOld {
             {
                 newParams.add(expr)
                 val possibleChanName = expr.substringBefore('[') // expr.replace(Regex("""\[\s*[^,\[\]]+\]"""), "") // Remove subscripts
-                val paCha: List<String> = localPaChas[possibleChanName] ?: globalPaChas[possibleChanName] ?: continue
-                for ((index, _) in paCha.withIndex())
-                    newParams.add("${possibleChanName}_p${index + 1}")
+                //val paCha: List<String> = localPaChas[possibleChanName] ?: globalPaChas[possibleChanName] ?: continue
+                //for ((index, _) in paCha.withIndex())
+                //    newParams.add("${possibleChanName}_p${index + 1}")
             }
 
             val newInstantiation = "$template(${newParams.joinToString(", ")})"

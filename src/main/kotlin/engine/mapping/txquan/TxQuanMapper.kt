@@ -10,16 +10,16 @@ class TxQuanMapper : Mapper {
 
     private class TxQuanQueryPhase : QueryPhase()
     {
-        private val aBox = "INVARIABLY"
+        private val aBox = "ALWAYS"
         private val eDiamond = "POSSIBLY"
-        private val eBox = "SUBINVARIABLY"
+        private val eBox = "E[]" // Alternatives: "POTENTIALLY ALWAYS"
         private val aDiamond = "EVENTUALLY"
         private val arrow = "LEADSTO"
 
         private val textualQuantifierStrings = hashMapOf(
             Pair(aBox,     "A[]"),
             Pair(eDiamond, "E<>"),
-            Pair(eBox,     "E[]"), // Alternatives: "POTENTIALLY ALWAYS"
+            Pair(eBox,     "E[]"),
             Pair(aDiamond, "A<>"),
             Pair(arrow,    "-->")
         )
@@ -125,9 +125,10 @@ class TxQuanMapper : Mapper {
                 error.endLine, error.endColumn
             )
 
+            // If an error relates to a mapped element
             val backMap = backMapToOriginalValue.find { it.first.first == errorRange.first && it.first.last == errorRange.last }
             if (null != backMap) {
-                val backMappedErrorLocation = getStartAndEndLinesAndColumns(latestQueryInput, backMap.third, 0)
+                val backMappedErrorLocation = getLinesAndColumnsFromRange(latestQueryInput, backMap.third, 0)
                 error.beginLine = backMappedErrorLocation.first
                 error.beginColumn = backMappedErrorLocation.second
                 error.endLine = backMappedErrorLocation.third

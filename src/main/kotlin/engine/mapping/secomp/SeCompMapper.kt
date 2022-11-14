@@ -16,5 +16,10 @@ class SeCompMapper : Mapper {
             // TODO
             return listOf()
         }
+
+
+        override fun mapModelErrors(errors: List<UppaalError>): List<UppaalError> {
+            return errors
+        }
     }
 }

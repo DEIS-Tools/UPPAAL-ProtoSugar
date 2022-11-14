@@ -1,4 +1,5 @@
 import engine.MapperEngine
+import engine.mapping.Quadruple
 import engine.mapping.UppaalError
 import engine.mapping.autoarr.AutoArrMapper
 import engine.mapping.pacha.PaChaMapper
@@ -248,27 +249,25 @@ fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
 }
 fun generateModelCommand(model: String): String
     = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.replace("\"", "\\\"")}\"}"
-fun interceptModelErrorResponse(input: BufferedReader, generatedErrors: List<UppaalError>): List<UppaalError>
+fun interceptModelErrorResponse(input: BufferedReader, mapperErrors: List<UppaalError>): List<UppaalError>
 {
     var errors = ""
-    while (!errors.endsWith("}]") && !errors.endsWith("\\}]")) // ']' marks end of error list
+    while (!errors.endsWith("}]") && !errors.endsWith("\\}]")) // '}]' marks end of error list
         errors += input.read().toChar()
 
     var throwaway = ""
-    while (!throwaway.endsWith("]}}")) // Marks end after warning-list and two object ends
+    while (!throwaway.endsWith("]}}")) // ']}}' marks the end after warning-list and two object ends
         throwaway += input.read().toChar()
 
-    // TODO: Instead, put through a "Model Error Mapper" (remember to pass generatedErrors)
-    val errorsTree = errorListGrammar.matchExact(errors) as Node;
+    val errorsTree = errorListGrammar.matchExact(errors) as Node
     val errorJsonList =
         listOf(errorsTree.children[1].toString()) // First error
             .plus( // For each child in multiple, for the second child in each of these, get string.
                 (errorsTree.children[2] as Node).children.map { (it as Node).children[1].toString() }
             )
-    return errorJsonList
-        .map { UppaalError.fromJson(it) }
-        .plus(generatedErrors)
-        .toList()
+
+    val engineErrors = errorJsonList.map { UppaalError.fromJson(it) }
+    return engine.mapModelErrors(engineErrors, mapperErrors)
 }
 fun interceptModelSuccessResponse(input: BufferedReader)
 {
