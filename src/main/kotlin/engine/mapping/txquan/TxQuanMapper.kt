@@ -12,7 +12,7 @@ class TxQuanMapper : Mapper {
     {
         private val aBox = "ALWAYS"
         private val eDiamond = "POSSIBLY"
-        private val eBox = "E[]" // Alternatives: "POTENTIALLY ALWAYS"
+        private val eBox = "POTENTIALLY_ALWAYS"
         private val aDiamond = "EVENTUALLY"
         private val arrow = "LEADSTO"
 

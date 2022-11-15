@@ -155,7 +155,6 @@ class AutoArrMapper : Mapper {
 
         private fun mapDimension(value: String, index: Int, currDimVar: String): String {
             val singleDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)($currDimVar)(?>[^_a-zA-Z0-9\[]|$)""")
-
             return singleDimPattern.replace(value) { it.value.replace(currDimVar, index.toString()) }
         }
     }
