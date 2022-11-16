@@ -21,15 +21,18 @@ class AutoArrMapper : Mapper {
         private val arrayGrammar = Confre(
             """
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = -?[0-9]+
+            INT = [0-9]+
             BOOL = true|false
             
             AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' (INT | IDENT) ']'} '=' '{' [IDENT {',' IDENT}] '->' Expression '}' ';' .
-            Expression :== [Unary] (Term  {'[' Expression ']'} | '(' Expression ')') [Binary Expression].
+            
+            Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) [(Binary|Assignment) Expression] .
             Term       :== IDENT | INT | BOOL .
             Unary      :== '+' | '-' | '!' | 'not' .
             Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
                          | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
+            Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
+            Array  :== '[' [Expression] ']' .
         """.trimIndent())
 
         init {

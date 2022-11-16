@@ -26,7 +26,7 @@ class TxQuanMapper : Mapper {
 
         private val queryGrammar = Confre("""
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = -?[0-9]+
+            INT = [0-9]+
             BOOL = true|false
             
             Query :== [Quantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .
@@ -35,13 +35,14 @@ class TxQuanMapper : Mapper {
                          | ('E[]' | '$eBox')
                          | ('A<>' | '$aDiamond') .
             Subjection :== 'under' IDENT .
-            Expression :== [Unary] (Term  ['[' Expression ']'] | '(' Expression ')') [Binary Expression] .
-            Term       :== IDENT ['(' INT {',' INT} ')']['.' IDENT] | INT | BOOL .
+            
+            Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) ['.' IDENT] [(Binary|Assignment) Expression] .
+            Term       :== IDENT | INT | BOOL .
             Unary      :== '+' | '-' | '!' | 'not' .
-            Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>'
-                         | '+' | '-' | '*' | '/' | '%' | '&'
-                         | '|' | '^' | '<<' | '>>' | '&&' | '||'
-                         | '<?' | '>?' | 'or' | 'and' | 'imply' .
+            Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
+                         | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
+            Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
+            Array  :== '[' [Expression] ']' .
         """.trimIndent())
 
         // newRange (inclusive), originalValue, originalRange (inclusive)

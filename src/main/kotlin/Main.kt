@@ -49,23 +49,16 @@ fun main(args: Array<String>)
     val tags = getTags(args)
     engine = MapperEngine(tags[MAPPERS_TAG]?.map { mappers[it]!! } ?: listOf())
 
-    try {
-        when {
-            tags.containsKey(FILE_TAG) -> runOnFile(File(tags[FILE_TAG]!![0]), tags[OUTPUT_TAG]?.let { File(it[0]) })
-            tags.containsKey(SERVER_TAG) -> runServer(tags[SERVER_TAG]!![0])
-            tags.containsKey(DEBUG_TAG) -> runDebug(
-                tags[DEBUG_TAG]!![0],
-                File(tags[DEBUG_TAG]!![1]),
-                File(tags[DEBUG_TAG]!![2]),
-                File(tags[DEBUG_TAG]!![3])
-            )
-
-            else -> usage()
-        }
-    }
-    catch (ex: Exception)
-    {
-        File("SugarCube-CrashDetails.txt").printWriter().use { out -> out.println(ex.toString()) }
+    when {
+        tags.containsKey(FILE_TAG) -> runOnFile(File(tags[FILE_TAG]!![0]), tags[OUTPUT_TAG]?.let { File(it[0]) })
+        tags.containsKey(SERVER_TAG) -> tryRunOnServer(tags[SERVER_TAG]!![0])
+        tags.containsKey(DEBUG_TAG) -> runDebug(
+            tags[DEBUG_TAG]!![0],
+            File(tags[DEBUG_TAG]!![1]),
+            File(tags[DEBUG_TAG]!![2]),
+            File(tags[DEBUG_TAG]!![3])
+        )
+        else -> usage()
     }
 }
 
@@ -125,6 +118,14 @@ fun runOnFile(inputFile: File, outputFile: File?)
         }
 }
 
+
+fun tryRunOnServer(server: String)
+{
+    try { runServer(server) }
+    catch (ex: Exception) {
+        File("ProtoSugar-CrashDetails.txt").printWriter().use { out -> out.println(ex.toString()) }
+    }
+}
 
 fun runServer(server: String)
 {
@@ -247,6 +248,8 @@ fun runServer(server: String)
                 toGuiBuffer = ""
             }
         }
+
+        Thread.sleep(100) // An attempt to make the program NOT hog an entire CPU core due to constant polling
     }
 }
 

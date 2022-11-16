@@ -1,5 +1,6 @@
 package engine.mapping
 
+import engine.mapping.pacha.PaChaMap
 import engine.parsing.Confre
 import engine.parsing.Node
 import engine.parsing.ParseTree
@@ -50,7 +51,7 @@ class PathNode(val element: UppaalPojo, val index: Int? = null) {
             is Parameter -> "parameter"
             is Template -> "template[${index ?: throw Exception("PathNode with Template has 'index == null'")}]"
             is Transition -> "transition[${index ?: throw Exception("PathNode with Transition has 'index == null'")}]"
-            is Label ->  "transition[${index ?: throw Exception("PathNode with Transition has 'index == null'")}]"
+            is Label ->  "label[${index ?: throw Exception("PathNode with Label has 'index == null'")}]"
             else -> throw Exception("PathNode cannot print unhandled UppaalPojo '${element::class.java.typeName}'")
         }
     }
