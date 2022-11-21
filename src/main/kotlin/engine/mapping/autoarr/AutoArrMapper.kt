@@ -10,14 +10,6 @@ class AutoArrMapper : Mapper {
         = Pair(sequenceOf(Phase1()), null)
 
     private class Phase1 : ModelPhase() {
-        private val constIntGrammar = Confre(
-            """
-            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = -?[0-9]+
-            
-            ConstInt  :== 'const' 'int' IDENT '=' INT ';' .
-        """.trimIndent())
-
         private val arrayGrammar = Confre(
             """
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
@@ -26,13 +18,7 @@ class AutoArrMapper : Mapper {
             
             AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' (INT | IDENT) ']'} '=' '{' [IDENT {',' IDENT}] '->' Expression '}' ';' .
             
-            Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) [(Binary|Assignment) Expression] .
-            Term       :== IDENT | INT | BOOL .
-            Unary      :== '+' | '-' | '!' | 'not' .
-            Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
-                         | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
-            Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
-            Array  :== '[' [Expression] ']' .
+            ${ConfreHelper.expressionGrammarString}
         """.trimIndent())
 
         init {
@@ -82,7 +68,7 @@ class AutoArrMapper : Mapper {
         private fun getConstantInts(code: String): ArrayList<Triple<IntRange, String, Int>> {
             // TODO: Allow constant ARRAY-variables as size parameter? Constants that are computable?
             val constInts = ArrayList<Triple<IntRange, String, Int>>()
-            for (constInt in constIntGrammar.findAll(code).map { it as Node }) {
+            for (constInt in ConfreHelper.constIntGrammar.findAll(code).map { it as Node }) {
                 val range = IntRange(constInt.startPosition(), constInt.endPosition())
                 val name = constInt.children[2]!!.toString()
                 val value = constInt.children[4]!!.toString().toInt()

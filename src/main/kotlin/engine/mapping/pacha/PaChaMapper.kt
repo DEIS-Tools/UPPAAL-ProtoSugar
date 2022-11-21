@@ -1,11 +1,9 @@
 package engine.mapping.pacha
 
 import engine.mapping.*
-import engine.parsing.Confre
-import engine.parsing.Leaf
-import engine.parsing.Node
-import engine.parsing.ParseTree
+import engine.parsing.*
 import uppaal_pojo.*
+import uppaal_pojo.Declaration
 import java.lang.Character.MIN_VALUE as nullChar
 
 
@@ -23,16 +21,6 @@ class PaChaMapper : Mapper {
         private val backMaps = HashMap<Quadruple<Int, Int, Int, Int>, Pair<Quadruple<Int, Int, Int, Int>, String>>()
         private val paChaMaps: HashMap<String?, PaChaMap> = hashMapOf(Pair(null, PaChaMap()))
 
-        private val expressionGrammar = """
-                Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) [(Binary|Assignment) Expression] .
-                Term       :== IDENT | INT | BOOL .
-                Unary      :== '+' | '-' | '!' | 'not' .
-                Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
-                             | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
-                Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
-                Array  :== '[' [Expression] ']' .
-            """.trimIndent()
-
 
         // TODO: Fix so that normal channel parameters of Templates are tracked for type-error-handing in partial instantiations
         private val chanDeclGrammar = Confre("""
@@ -44,20 +32,7 @@ class PaChaMapper : Mapper {
             Type     :== ['&'] IDENT [TypeList] {Array} .
             TypeList :== '(' [Type] {',' [Type]} ')' .
             
-            $expressionGrammar
-        """.trimIndent())
-
-        private val partialInstantiationGrammar = Confre("""
-            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = [0-9]+
-            BOOL = true|false
-
-            Instantiation :== IDENT ['(' [Params] ')'] '=' IDENT '(' [[Expression] {',' [Expression]}] ')' ';'.
-            
-            Params :== [Type IDENT {Array}] {',' [Type IDENT {Array}]} .
-            Type   :== ['const'] IDENT ['[' [Expression] ',' [Expression] ']'].
-            
-            $expressionGrammar
+            ${ConfreHelper.expressionGrammarString}
         """.trimIndent())
 
         private val chanUseGrammar = Confre("""
@@ -67,7 +42,7 @@ class PaChaMapper : Mapper {
 
             ChanUsage :== IDENT {Array} ['(' [['meta'] [Expression]] {',' [['meta'] [Expression]]} ')'] ('!' | '?') .
             
-            $expressionGrammar
+            ${ConfreHelper.expressionGrammarString}
         """.trimIndent())
 
         private val expressionAssignmentListGrammar = Confre("""
@@ -77,7 +52,7 @@ class PaChaMapper : Mapper {
 
             List       :== Expression [Assignment Expression] {',' Expression [Assignment Expression]} .
             
-            $expressionGrammar
+            ${ConfreHelper.expressionGrammarString}
         """.trimIndent())
 
 
@@ -93,7 +68,7 @@ class PaChaMapper : Mapper {
 
         private fun registerTemplatePaChaMap(path: List<PathNode>, template: Template): List<UppaalError> {
             paChaMaps[
-                template.name ?: return listOf(UppaalError(path, 1,1,1,1, "Template has no name.", "", isUnrecoverable = true))
+                template.name.content ?: return listOf(UppaalError(path, 1,1,1,1, "Template has no name.", "", isUnrecoverable = true))
             ] = PaChaMap()
             return listOf()
         }
@@ -101,7 +76,7 @@ class PaChaMapper : Mapper {
 
         private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
             val parent = path.takeLast(2).first().element
-            val paChaMap = paChaMaps[(parent as? Template)?.name]!!
+            val paChaMap = paChaMaps[(parent as? Template)?.name?.content]!!
 
             val (newContent, errors) = mapPaChaDeclarations(path, declaration.content, paChaMap)
             declaration.content = newContent
@@ -110,7 +85,7 @@ class PaChaMapper : Mapper {
 
         private fun mapParameter(path: List<PathNode>, parameter: Parameter): List<UppaalError> {
             val template = path.takeLast(2).first().element as Template
-            val paChaMap = paChaMaps[template.name]!!
+            val paChaMap = paChaMaps[template.name.content]!!
 
             val (newContent, errors) = mapPaChaDeclarations(path, parameter.content, paChaMap)
             parameter.content = newContent
@@ -118,19 +93,19 @@ class PaChaMapper : Mapper {
         }
 
         private fun mapTransition(path: List<PathNode>, transition: Transition): List<UppaalError> {
-            val sync: Label = transition.labels?.find { it.kind == "synchronisation" } ?: return listOf()
-            val update: Label = transition.labels!!.find { it.kind == "assignment" }
+            val sync: Label = transition.labels.find { it.kind == "synchronisation" } ?: return listOf()
+            val update: Label = transition.labels.find { it.kind == "assignment" }
                                 ?: Label("assignment", sync.x, sync.y + 17)
 
             val template = path.takeLast(2).first().element as Template
-            val templatePaChas = paChaMaps[template.name]!!
+            val templatePaChas = paChaMaps[template.name.content]!!
 
             val match = chanUseGrammar.matchExact(sync.content) as? Node ?: return listOf()
-            if (!transition.labels!!.contains(update))
-                transition.labels!!.add(update)
+            if (!transition.labels.contains(update))
+                transition.labels.add(update)
 
-            val syncPath = path.plus(PathNode(sync, transition.labels!!.indexOf(sync) + 1))
-            val updatePath = path.plus(PathNode(sync, transition.labels!!.indexOf(update) + 1))
+            val syncPath = path.plus(PathNode(sync, transition.labels.indexOf(sync) + 1))
+            val updatePath = path.plus(PathNode(sync, transition.labels.indexOf(update) + 1))
             return mapEmitOrReceive(syncPath, updatePath, match, sync, update, templatePaChas)
         }
 
@@ -433,7 +408,7 @@ class PaChaMapper : Mapper {
 
             var newSystem = system
             var offset = 0
-            for (inst in partialInstantiationGrammar.findAll(system).map { it as Node })
+            for (inst in ConfreHelper.partialInstantiationGrammar.findAll(system).map { it as Node })
             {
                 val lhsTemplateName = inst.children[3]!!.toString()
                 val templatePaChas = paChaMaps[lhsTemplateName]!!
@@ -453,7 +428,7 @@ class PaChaMapper : Mapper {
                     val argChannelName = argAndParam.first.toString().split(' ', limit = 3)[1]
                     val argPaCha = globalPaChas[argChannelName]
                     if (argPaCha == null) {
-                        errors.add(createUppaalError(path, system, argAndParam.first, "'$argChannelName' is not a parameterized channel (array).", true))
+                        errors.add(createUppaalError(path, system, argAndParam.first, "'$argChannelName' is not a parameterized channel (or channel-array).", true))
                         continue
                     }
 

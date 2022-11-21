@@ -5,7 +5,7 @@ import org.simpleframework.xml.*
 @Root(name = "template")
 class Template : UppaalPojo {
     @field:Element(name = "name", required = false)
-    var name: String? = null
+    var name: Name = Name()
 
     @field:Element(name = "parameter", required = false)
     var parameter: Parameter? = null
@@ -14,14 +14,14 @@ class Template : UppaalPojo {
     var declaration: Declaration? = null
 
     @field:ElementList(name = "location", required = false, inline = true)
-    var locations: List<Location>? = null
+    var locations: MutableList<Location> = ArrayList()
 
     @field:ElementList(name = "branchpoint", required = false, inline = true)
-    var branchpoint: List<Branchpoint>? = null
+    var branchpoint: MutableList<Branchpoint> = ArrayList()
 
     @field:Element(name = "init", required = false)
     var init: Init? = null
 
     @field:ElementList(name = "transition", required = false, inline = true)
-    var transitions: List<Transition>? = null
+    var transitions: MutableList<Transition> = ArrayList()
 }

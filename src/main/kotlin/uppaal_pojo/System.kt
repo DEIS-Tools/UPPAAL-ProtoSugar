@@ -5,6 +5,6 @@ import org.simpleframework.xml.Text
 
 @Root(name = "system")
 class System : UppaalPojo {
-    @field:Text()
+    @field:Text
     lateinit var content: String
 }

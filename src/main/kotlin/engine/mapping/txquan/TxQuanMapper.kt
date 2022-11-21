@@ -12,16 +12,16 @@ class TxQuanMapper : Mapper {
     {
         private val aBox = "ALWAYS"
         private val eDiamond = "POSSIBLY"
-        private val eBox = "POTENTIALLY_ALWAYS"
+        private val eBoxNegated = "AVOIDABLE"
         private val aDiamond = "EVENTUALLY"
         private val arrow = "LEADSTO"
 
         private val textualQuantifierStrings = hashMapOf(
-            Pair(aBox,     "A[]"),
-            Pair(eDiamond, "E<>"),
-            Pair(eBox,     "E[]"),
-            Pair(aDiamond, "A<>"),
-            Pair(arrow,    "-->")
+            Pair(aBox,        "A[]"),
+            Pair(eDiamond,    "E<>"),
+            Pair(eBoxNegated, "E[]"),
+            Pair(aDiamond,    "A<>"),
+            Pair(arrow,       "-->")
         )
 
         private val queryGrammar = Confre("""
@@ -32,8 +32,9 @@ class TxQuanMapper : Mapper {
             Query :== [Quantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .
             Quantifier :== ('A[]' | '$aBox')
                          | ('E<>' | '$eDiamond')
-                         | ('E[]' | '$eBox')
-                         | ('A<>' | '$aDiamond') .
+                         | ('A<>' | '$aDiamond')
+                         | 'E[]'
+                         | '$eBoxNegated' .
             Subjection :== 'under' IDENT .
             
             Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) ['.' IDENT] [(Binary|Assignment) Expression] .
@@ -60,19 +61,25 @@ class TxQuanMapper : Mapper {
                 return Pair(latestQueryOutput, null)
             }
 
-            val textualQuantifiers = queryTree
+            val textualQuantifierLeaves = queryTree
                 .postOrderWalk()
                 .filterIsInstance<Leaf>()
                 .filter { isTextualQuantifier(it) }
 
             var newQuery = query
             var offset = 0
-            for (txQuan in textualQuantifiers)
-            {
+            for (txQuan in textualQuantifierLeaves) {
                 val replacement = textualQuantifierStrings[txQuan.token!!.value]!!
                 newQuery = newQuery.replaceRange(txQuan.startPosition() + offset, txQuan.endPosition() + 1 + offset, replacement)
                 registerBackMap(IntRange(txQuan.startPosition(), txQuan.endPosition()), txQuan.token.value, replacement, offset)
                 offset += replacement.length - txQuan.length()
+
+                // AVOIDABLE requires negating the entire query
+                if (txQuan.token.value == eBoxNegated) {
+                    val insertPos = txQuan.endPosition() + 1 + offset + 1  // +1 twice to skip the space after E[] as well
+                    newQuery = newQuery.replaceRange(insertPos, insertPos, "not (")
+                    newQuery += ')'
+                }
             }
 
             latestQueryOutput = newQuery

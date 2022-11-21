@@ -4,6 +4,7 @@ import engine.mapping.pacha.PaChaMap
 import engine.parsing.Confre
 import engine.parsing.Node
 import engine.parsing.ParseTree
+import jsonFy
 import uppaal_pojo.*
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
@@ -46,11 +47,13 @@ class PathNode(val element: UppaalPojo, val index: Int? = null) {
     override fun toString(): String {
         return when (element) {
             is Nta -> "nta"
+            is Name ->  "name"
+            is Parameter -> "parameter"
             is Declaration -> "declaration"
             is System -> "system"
-            is Parameter -> "parameter"
             is Template -> "template[${index ?: throw Exception("PathNode with Template has 'index == null'")}]"
             is Transition -> "transition[${index ?: throw Exception("PathNode with Transition has 'index == null'")}]"
+            is Location ->  "location[${index ?: throw Exception("PathNode with Location has 'index == null'")}]"
             is Label ->  "label[${index ?: throw Exception("PathNode with Label has 'index == null'")}]"
             else -> throw Exception("PathNode cannot print unhandled UppaalPojo '${element::class.java.typeName}'")
         }
@@ -111,7 +114,7 @@ class UppaalError {
     }
 
     override fun toString(): String {
-        return """{"path":"$path","begln":$beginLine,"begcol":$beginColumn,"endln":$endLine,"endcol":$endColumn,"msg":"$message","ctx":"$context"}"""
+        return """{"path":"$path","begln":$beginLine,"begcol":$beginColumn,"endln":$endLine,"endcol":$endColumn,"msg":"${message.jsonFy()}","ctx":"$context.jsonFy()"}"""
     }
 
     companion object {

@@ -1,5 +1,4 @@
 import engine.MapperEngine
-import engine.mapping.Quadruple
 import engine.mapping.UppaalError
 import engine.mapping.autoarr.AutoArrMapper
 import engine.mapping.pacha.PaChaMapper
@@ -263,13 +262,14 @@ fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
     return engine.mapModel(originalModel.replace("\\\"", "\""))
 }
 fun generateModelCommand(model: String): String
-    = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.replace("\"", "\\\"")}\"}"
+    = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.jsonFy()}\"}"
 fun interceptModelErrorResponse(input: BufferedReader, mapperErrors: List<UppaalError>): List<UppaalError>
 {
     var errors = ""
     while (!errors.endsWith("}]") && !errors.endsWith("\\}]")) // '}]' marks end of error list
         errors += input.read().toChar()
 
+    // Throw away rest, including "warnings", since this is just ignored when errors are present
     var throwaway = ""
     while (!throwaway.endsWith("]}}")) // ']}}' marks the end after warning-list and two object ends
         throwaway += input.read().toChar()
@@ -306,7 +306,7 @@ fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
     return Pair(escapedQuery, result.second)
 }
 fun generateQueryCommand(query: String): String
-    = "{\"cmd\":\"modelCheck\",\"args\":\"${query.replace("\"", "\\\"")}\"}"
+    = "{\"cmd\":\"modelCheck\",\"args\":\"${query.jsonFy()}\"}"
 fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
 {
     var error = ""
@@ -320,7 +320,11 @@ fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
     return engine.mapQueryError(UppaalError.fromJson(error))
 }
 fun generateQueryErrorResponse(error: UppaalError): String
-    = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
+    = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
+
+fun String.jsonFy()
+        = this.replace("\"", "\\\"")
+    .replace(":", "\\:")
 
 
 fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
