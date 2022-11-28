@@ -412,7 +412,7 @@ private fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
 
 fun String.jsonFy()
-    = this.replace("\"", "\\\"").replace("\\", "\\\\")
+    = this.replace("\\", "\\\\").replace("\"", "\\\"")
 fun String.unJsonFy()
         = this.replace("\\\"", "\"").replace("\\\\", "\\")
 fun IntRange.offset(offset: Int)
