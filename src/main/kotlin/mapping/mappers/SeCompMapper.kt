@@ -1,9 +1,10 @@
-package engine.mapping.secomp
+package mapping.mappers
 
-import engine.mapping.*
-import engine.parsing.Confre
-import engine.parsing.ConfreHelper
-import engine.parsing.Node
+import mapping.*
+import mapping.base.*
+import mapping.parsing.Confre
+import mapping.parsing.ConfreHelper
+import mapping.parsing.Node
 import uppaal_pojo.*
 import java.util.Stack
 
@@ -20,18 +21,20 @@ class SeCompMapper : Mapper {
     // parameters: null-pair in list means non-free parameter.
     private data class FreeInstantiation(val baseTemplateName: String?, val parameters: List<Triple<Int, Int, String>?>)
 
-    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?> {
+    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?> {
         val subTemplates = HashMap<String, SubTemplateInfo>()                       // String = Sub-template name
         val baseSubTemplateUsers = HashMap<String, MutableList<SubTemplateUsage>>() // String = Any-template name
         val numSubTemplateUsers = HashMap<String, FreeInstantiation>()              // String = Any-template or partial instantiation name
         val systemLine = ArrayList<String>()  // system process1, process2, ..., process_n
+        val subTemToParent = HashMap<Pair<String, Int>, Triple<String, Int, Int>>()
 
-        return Pair(
+        return Triple(
             sequenceOf(
                 IndexingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine),
                 ReferenceCheckingPhase(subTemplates, baseSubTemplateUsers),
-                MappingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine)
+                MappingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine, subTemToParent)
             ),
+            SeCompSimulatorPhase(subTemplates, baseSubTemplateUsers, subTemToParent),
             SeCompQueryPhase()
         )
     }
@@ -75,9 +78,11 @@ class SeCompMapper : Mapper {
         }
 
         private fun mapTemplate(path: List<PathNode>, template: Template): List<UppaalError> {
-            val temName = template.name.content ?: return listOf(createUppaalError(
+            val temName = template.name.content ?: return listOf(
+                createUppaalError(
                 path, "", IntRange(0,0), "Template has no name.", true
-            ))
+            )
+            )
 
             val errors = ArrayList<UppaalError>()
             if (temName.startsWith(SUB_TEMPLATE_NAME_PREFIX))
@@ -88,20 +93,26 @@ class SeCompMapper : Mapper {
                     .map { loc -> loc.id }
 
                 if (exitIds.isEmpty())
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, "A sub-template must have at least one exit location (location with no outgoing transitions)."
-                    ))
+                    )
+                    )
 
                 if (template.transitions.none { it.source.ref == entryId })
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, "The entry state of a sub-template must have at least one outgoing transition."
-                    ))
+                    )
+                    )
 
                 // TODO: Relax this constraint later
                 if (template.parameter != null && template.parameter!!.content.isNotBlank())
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, template.parameter!!.content, IntRange(0,template.parameter!!.content.length - 1), "Sub-templates currently do not support parameters."
-                    ))
+                    )
+                    )
 
                 subTemplates[temName] = SubTemplateInfo(entryId, exitIds, isFaulty = template.init?.ref == null || errors.isNotEmpty())
             }
@@ -124,22 +135,28 @@ class SeCompMapper : Mapper {
 
                 if (nameAndInstance.size != 2)
                 {
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         locPath.plus(PathNode(locAndIndex.value.name!!)), locName, IntRange(0, locName.length-1), "To insert a sub-template, format the location's name as: \"::[sub-template name] [instantiated name]::\"."
-                    ))
+                    )
+                    )
                     locAndIndex.value.name!!.content = "" // Prevent "invalid identifier" error from UPPAAL
                 }
                 else
                 {
                     val locId = locAndIndex.value.id
                     if (template.init?.ref == locId)
-                        errors.add(createUppaalError(
+                        errors.add(
+                            createUppaalError(
                             locPath, "", IntRange(0,0), "The initial/entry location cannot be a sub-template instance."
-                        ))
+                        )
+                        )
                     if (template.transitions.none { it.target.ref == locId } && subTemplates.containsKey(locName))
-                        errors.add(createUppaalError(
+                        errors.add(
+                            createUppaalError(
                             locPath, "", IntRange(0,0), "The exit location cannot be a sub-template instance."
-                        ))
+                        )
+                        )
 
                     if (errors.isEmpty()) {
                         subTemplateUsages.add(SubTemplateUsage(locId, nameAndInstance[0], nameAndInstance[1], locAndIndex.value.name!!.content!!))
@@ -179,9 +196,11 @@ class SeCompMapper : Mapper {
             {
                 val baseName = tree.children[3]!!.toString()
                 if (subTemplates.containsKey(baseName))
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, system.content, tree.children[3]!!.range(), "Sub-templates cannot be instantiated by user-code.", true
-                    ))
+                    )
+                    )
                 else if (numSubTemplateUsers.containsKey(baseName)) {
                     val partialName = tree.children[0]!!.toString()
                     if (tree.children[1]?.isNotBlank() == true) {
@@ -202,9 +221,11 @@ class SeCompMapper : Mapper {
                 )
                 // Loop does not handle "cannot determine total number of instances" since UPPAAL will notify about this by itself.
                 for (nameNode in identNodes.filter { subTemplates.containsKey(it.toString()) })
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, system.content, nameNode, "Sub-templates cannot be instantiated by user-code.", true
-                    ))
+                    )
+                    )
                 systemLine.addAll(identNodes.map { it.toString() }.filter { numSubTemplateUsers.containsKey(it) })
             }
 
@@ -232,9 +253,11 @@ class SeCompMapper : Mapper {
                         parameterRanges.add(Triple(range.first, range.second, name))
                 }
                 else if (type.startsWith("scalar") || (freeTypedefs.containsKey(type) && freeTypedefs[type] == null)) { // 'null' in freeTypedefs means 'is scalar'
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         parameterPath, fullText, trueRange, "Users of sub-templates cannot have scalar parameters."
-                    ))
+                    )
+                    )
                     parameterRanges.add(null)
                 }
                 else
@@ -309,8 +332,6 @@ class SeCompMapper : Mapper {
 
 
         override fun mapModelErrors(errors: List<UppaalError>) = errors // TODO: Relocate errors on location names
-
-        override fun mapProcesses(processes: List<ProcessInfo>) { }
     }
 
     private class ReferenceCheckingPhase(
@@ -331,9 +352,11 @@ class SeCompMapper : Mapper {
                 if (usage.subTemplateName !in subTemplates.keys) {
                     val guiltyLocation = template.locations.withIndex().find { it.value.id == usage.insertLocationId }!!
                     val locationPath = path.plus(PathNode(guiltyLocation.value, guiltyLocation.index+1))
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         locationPath, usage.originalText, usage.originalText.indices, "The template name '${usage.subTemplateName}' either does not exist or is not a sub-template.", true
-                    ))
+                    )
+                    )
                 }
 
             return errors + checkCircularUse(path, listOf(templateName))
@@ -342,9 +365,11 @@ class SeCompMapper : Mapper {
         private fun checkCircularUse(path: List<PathNode>, branch: List<String>): List<UppaalError> {
             if (branch.size != branch.distinct().size)
                 return if (branch.last() == branch.first()) // If cycle pertains to root template
-                    listOf(createUppaalError(
+                    listOf(
+                        createUppaalError(
                         path, "Cyclic sub-template usage: ${branch.joinToString(" -> ") { "'${it}'" }}.", true
-                    ))
+                    )
+                    )
                 else
                     listOf() // If cycle does not pertain to root template, wait for that template's check to come
 
@@ -354,21 +379,20 @@ class SeCompMapper : Mapper {
 
 
         override fun mapModelErrors(errors: List<UppaalError>) = errors
-
-        override fun mapProcesses(processes: List<ProcessInfo>) { }
     }
 
     private class MappingPhase(
         val subTemplates: HashMap<String, SubTemplateInfo>,
         val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
         val numSubTemplateUsers: HashMap<String, FreeInstantiation>,
-        val systemLine: ArrayList<String>
+        val systemLine: ArrayList<String>,
+        val subTemToParent: HashMap<Pair<String, Int>, Triple<String, Int, Int>> // subTem:name+instance -> parentTem:name + instance + subTemIndex
     ) : ModelPhase() {
         val rootTemplateToPartials = HashMap<String, ArrayList<String>>() // Root template -> Partial instantiation
         val totalNumInstances = HashMap<String, Int>() // Any-template name -> instance count
 
         val partialToRootStartIndex = HashMap<String, Int>() // partial (or root) instance name -> start root instance index
-        val subTemToParent = HashMap<Pair<String, Int>, Triple<String, Int, Int>>() // subTem:name+instance -> parentTem:name + instance + subTemIndex
+
 
         init {
             register(::mapGlobalDeclaration, prefix = listOf(Nta::class.java))
@@ -576,9 +600,11 @@ class SeCompMapper : Mapper {
                 // Otherwise, generate actual USER_INDEX and pass to base on last parameter
                 if (isBaseOfOtherPartial) {
                     if (isDirectlyInstantiated) {
-                        return listOf(createUppaalError(
+                        return listOf(
+                            createUppaalError(
                             path, system.content, tree, "The mapper still does not support using a template or partial instantiation on the system-line while also being the base of a/another partial instantiation.", true
-                        ))
+                        )
+                        )
 
                         // TODO: Create a new partial instantiation to be used in place of the current on the system line
 
@@ -652,9 +678,11 @@ class SeCompMapper : Mapper {
             // TODO: Bubble up directly instantiated root templates
             // TODO: Relax below constraint later
             if (systemLine.any { baseSubTemplateUsers.containsKey(it) })
-                return listOf(createUppaalError(
+                return listOf(
+                    createUppaalError(
                     path, system.content, systemLineNode, "The mapper does not yet support directly instantiating a template that uses sub-templates.", true
-                ))
+                )
+                )
 
             if (newInstantiations.isNotEmpty()) {
                 val indexAfterSystemLine = systemLineNode.endPosition() + offset + 1 // +1 to compensate for inclusive end position
@@ -679,8 +707,14 @@ class SeCompMapper : Mapper {
         override fun mapModelErrors(errors: List<UppaalError>): List<UppaalError> {
             return errors
         }
+    }
 
 
+    private class SeCompSimulatorPhase(
+        val subTemplates: HashMap<String, SubTemplateInfo>,
+        val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
+        val subTemToParent: HashMap<Pair<String, Int>, Triple<String, Int, Int>>
+    ) : SimulatorPhase() {
         override fun mapProcesses(processes: List<ProcessInfo>) {
             // TODO: Mappings to/from? auto-generated padding-partial-instantiation names?
             // TODO: Mappings for query phase
@@ -725,6 +759,7 @@ class SeCompMapper : Mapper {
             }
         }
     }
+
 
     private class SeCompQueryPhase : QueryPhase() {
         override fun mapQuery(query: String): Pair<String, UppaalError?> {

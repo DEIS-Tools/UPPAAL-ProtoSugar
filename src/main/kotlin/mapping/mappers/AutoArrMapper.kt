@@ -1,13 +1,13 @@
-package engine.mapping.autoarr
+package mapping.mappers
 
-import engine.mapping.*
-import engine.parsing.*
+import mapping.base.*
+import mapping.parsing.*
 import uppaal_pojo.Declaration
 import uppaal_pojo.System
 
 class AutoArrMapper : Mapper {
-    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
-        = Pair(sequenceOf(Phase1()), null)
+    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
+        = Triple(sequenceOf(Phase1()), null, null)
 
     private class Phase1 : ModelPhase() {
         private val arrayConfre = Confre(
@@ -100,28 +100,38 @@ class AutoArrMapper : Mapper {
         private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String>, path: List<PathNode>, code: String, autoArr: Node): Collection<UppaalError> {
             val errors = ArrayList<UppaalError>()
             if (dimSizes.isEmpty())
-                errors.add(createUppaalError(
+                errors.add(
+                    createUppaalError(
                     path, code, autoArr.children[1]!!, "AutoArr-syntax requires at least one array dimension on variable '${autoArr.children[1]!!}'.", true
-                ))
+                )
+                )
             else if (dimVars.size != dimSizes.size)
-                errors.add(createUppaalError(
+                errors.add(
+                    createUppaalError(
                     path, code, autoArr.children[1]!!, "Array '${autoArr.children[1]!!}' must have an equal number of dimensions and dimension variables.", true
-                ))
+                )
+                )
 
             for (size in dimSizes.withIndex())
                 if (size.value == null)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, code, autoArr.children[2]!!, "Cannot determine size of array dimension ${size.index+1} of ${dimSizes.size} in array '${autoArr.children[1]!!}'.", true
-                    ))
+                    )
+                    )
                 else if (size.value!! <= 0)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, code, autoArr.children[2]!!, "Array dimension ${size.index+1} of ${dimSizes.size} in array '${autoArr.children[1]!!}' has non-positive size.", true
-                    ))
+                    )
+                    )
 
             if (dimVars.distinct().size != dimVars.size)
-                errors.add(createUppaalError(
+                errors.add(
+                    createUppaalError(
                     path, code, autoArr.children[5]!!, "Array '${autoArr.children[1]!!}' has duplicate dimension variable names.", true
-                ))
+                )
+                )
 
             return errors
         }
@@ -145,8 +155,5 @@ class AutoArrMapper : Mapper {
 
 
         override fun mapModelErrors(errors: List<UppaalError>) = errors // TODO: Filter/trans-locate errors on duplicated array elements?
-
-
-        override fun mapProcesses(processes: List<ProcessInfo>) { }
     }
 }

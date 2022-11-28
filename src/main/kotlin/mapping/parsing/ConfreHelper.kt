@@ -1,4 +1,4 @@
-package engine.parsing
+package mapping.parsing
 
 @Suppress("MemberVisibilityCanBePrivate")
 class ConfreHelper {

@@ -1,7 +1,7 @@
-package engine.mapping.pacha
+package mapping.mappers
 
-import engine.mapping.*
-import engine.parsing.*
+import mapping.base.*
+import mapping.parsing.*
 import uppaal_pojo.*
 import uppaal_pojo.Declaration
 import java.lang.Character.MIN_VALUE as nullChar
@@ -11,8 +11,8 @@ data class PaChaInfo(val numParameters: Int, val numDimensions: Int, val paramet
 class PaChaMap : HashMap<String, PaChaInfo>()
 
 class PaChaMapper : Mapper {
-    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
-        = Pair(sequenceOf(Phase1()), null)
+    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
+        = Triple(sequenceOf(Phase1()), null, null)
 
     private class Phase1 : ModelPhase()
     {
@@ -181,9 +181,11 @@ class PaChaMapper : Mapper {
                 scope[chanName] = PaChaInfo(numTypes, numDimensions, parameterIndex)
 
                 if (inParameterList && parameterIndex == null)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, code, guiltyRange, "Syntax error in parameters wrt. blocks: '()', '[]', and '{}'", true
-                    ))
+                    )
+                    )
             }
 
             return Pair(newCode, errors)
@@ -265,7 +267,8 @@ class PaChaMapper : Mapper {
             val argOrParamNodes = getArgOrParamNodes(match.children[2] as Node)
             val expectedLength = chanInfo?.numParameters ?: 0
             if (argOrParamNodes.size != expectedLength)
-                return errors.plus(createUppaalError(
+                return errors.plus(
+                    createUppaalError(
                     syncPath, originalSync, match.children[0]!!.range(), "'$channelName' expects '$expectedLength' arguments/parameters. Got '${argOrParamNodes.size}'.")
                 )
             if (errors.size > 0 || expectedLength == 0)
@@ -514,7 +517,5 @@ class PaChaMapper : Mapper {
             }
             return errors
         }
-
-        override fun mapProcesses(processes: List<ProcessInfo>) { }
     }
 }

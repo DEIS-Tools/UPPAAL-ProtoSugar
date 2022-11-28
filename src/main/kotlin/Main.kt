@@ -1,13 +1,8 @@
-import engine.MapperEngine
-import engine.mapping.ProcessInfo
-import engine.mapping.UppaalError
-import engine.mapping.autoarr.AutoArrMapper
-import engine.mapping.createUppaalError
-import engine.mapping.pacha.PaChaMapper
-import engine.mapping.secomp.SeCompMapper
-import engine.mapping.txquan.TxQuanMapper
-import engine.parsing.Confre
-import engine.parsing.Node
+import mapping.*
+import mapping.base.*
+import mapping.mappers.*
+import mapping.parsing.Confre
+import mapping.parsing.Node
 import java.io.*
 import java.lang.ProcessBuilder.Redirect
 import java.nio.charset.StandardCharsets
@@ -25,7 +20,7 @@ private const val DEBUG_TAG = "-debug"
 private const val MAPPERS_TAG = "-mappers"
 
 private val mappers = mapOf(
-    Pair("PaCha",   PaChaMapper()),
+    Pair("PaCha", PaChaMapper()),
     Pair("AutoArr", AutoArrMapper()),
     Pair("TxQuan", TxQuanMapper()),
     Pair("SeComp", SeCompMapper()),

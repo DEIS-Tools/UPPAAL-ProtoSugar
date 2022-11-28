@@ -1,6 +1,6 @@
-package engine
+package mapping
 
-import engine.mapping.*
+import mapping.base.*
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
 import uppaal_pojo.Nta
@@ -15,6 +15,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
     private val serializer: Serializer = Persister()
 
     private var modelPhases: List<ModelPhase>? = null
+    private var simulatorPhases: List<SimulatorPhase>? = null
     private var queryPhases: List<QueryPhase>? = null
 
 
@@ -35,6 +36,62 @@ class MapperEngine(private val mappers: List<Mapper>) {
             return Pair(newModel, errors)
         }
     }
+    private fun runModelMappers(nta: Nta): List<UppaalError> {
+        val errors = ArrayList<UppaalError>()
+        val newModelPhases = ArrayList<ModelPhase>()
+        val newSimulatorPhases = ArrayList<SimulatorPhase>()
+        val newQueryPhases = ArrayList<QueryPhase>()
+
+        for (mapper in mappers.map { it.getPhases() }) {
+            for (phase in mapper.first) {
+                val newErrors = visitNta(nta, listOf(PathNode(nta)), phase)
+                errors.addAll(newErrors)
+                if (newErrors.any { it.isUnrecoverable })
+                    return errors
+            }
+
+            newModelPhases.addAll(mapper.first)
+            if (mapper.second != null)
+                newSimulatorPhases.add(mapper.second!!)
+            if (mapper.third != null)
+                newQueryPhases.add(mapper.third!!)
+        }
+
+        modelPhases = newModelPhases
+        if (errors.size == 0) {
+            simulatorPhases = newSimulatorPhases
+            queryPhases = newQueryPhases
+        }
+
+        return errors
+    }
+    private fun visitNta(nta: Nta, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
+        phase.visit(path, nta).plus(phase.visit(path.plus(PathNode(nta.declaration)), nta.declaration))
+            .plus(nta.templates.withIndex().flatMap
+            { (index, template) -> visitTemplate(template, path.plus(PathNode(template, index+1)), phase) }
+            )
+            .plus(phase.visit(path.plus(PathNode(nta.system)), nta.system))
+    private fun visitTemplate(template: Template, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
+        phase.visit(path, template).asSequence()
+            .plus(phase.visit(path.plus(PathNode(template.name)), template.name))
+            .plus((template.parameter?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf()))
+            .plus(template.declaration?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf())
+            .plus(
+                template.locations.flatMap { phase.visit(path.plus(PathNode(it)), it) }
+            )
+            .plus(
+                template.branchpoint.flatMap { phase.visit(path.plus(PathNode(it)), it) }
+            )
+            .plus(
+                template.transitions.withIndex().flatMap { (index, transition) -> visitTransition(transition, path.plus(
+                    PathNode(transition, index+1)
+                ), phase) }
+            ).toList()
+    private fun visitTransition(transition: Transition, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
+        phase.visit(path, transition)
+            .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(PathNode(it.value, it.index)), it.value) })
+
+
     fun mapModelErrors(engineErrors: List<UppaalError>, mapperErrors: List<UppaalError>): List<UppaalError> {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
@@ -42,9 +99,10 @@ class MapperEngine(private val mappers: List<Mapper>) {
     }
     fun mapProcesses(processes: List<ProcessInfo>) {
         // Mapped in reverse order since the error is based on the last modelPhase's result
-        val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
+        val reversePhases = simulatorPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
         reversePhases.forEach { it.mapProcesses(processes) }
     }
+
 
     fun mapQuery(query: String): Pair<String, UppaalError?> {
         var finalQuery = query
@@ -64,55 +122,9 @@ class MapperEngine(private val mappers: List<Mapper>) {
     }
 
 
-    private fun runModelMappers(nta: Nta): List<UppaalError> {
-        val errors = ArrayList<UppaalError>()
-        val newModelPhases = ArrayList<ModelPhase>()
-        val newQueryPhases = ArrayList<QueryPhase>()
-
-        for (mapper in mappers.map { it.getPhases() }) {
-            for (phase in mapper.first) {
-                val newErrors = visitNta(nta, listOf(PathNode(nta)), phase)
-                errors.addAll(newErrors)
-                if (newErrors.any { it.isUnrecoverable })
-                    return errors
-            }
-            newModelPhases.addAll(mapper.first)
-            if (mapper.second != null)
-                newQueryPhases.add(mapper.second!!)
-        }
-        modelPhases = newModelPhases
-        if (errors.size == 0)
-            queryPhases = newQueryPhases
-
-        return errors
-    }
-    private fun visitNta(nta: Nta, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
-        phase.visit(path, nta).plus(phase.visit(path.plus(PathNode(nta.declaration)), nta.declaration))
-            .plus(nta.templates.withIndex().flatMap
-                { (index, template) -> visitTemplate(template, path.plus(PathNode(template, index+1)), phase) }
-            )
-            .plus(phase.visit(path.plus(PathNode(nta.system)), nta.system))
-    private fun visitTemplate(template: Template, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
-        phase.visit(path, template).asSequence()
-            .plus(phase.visit(path.plus(PathNode(template.name)), template.name))
-            .plus((template.parameter?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf()))
-            .plus(template.declaration?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf())
-            .plus(
-                template.locations.flatMap { phase.visit(path.plus(PathNode(it)), it) }
-            )
-            .plus(
-                template.branchpoint.flatMap { phase.visit(path.plus(PathNode(it)), it) }
-            )
-            .plus(
-                template.transitions.withIndex().flatMap { (index, transition) -> visitTransition(transition, path.plus(PathNode(transition, index+1)), phase) }
-            ).toList()
-    private fun visitTransition(transition: Transition, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
-        phase.visit(path, transition)
-            .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(PathNode(it.value, it.index)), it.value) })
-
-
     fun clearCache() {
         modelPhases = null
+        simulatorPhases = null
         queryPhases = null
     }
 }

@@ -1,4 +1,4 @@
-package engine.parsing
+package mapping.parsing
 
 import java.lang.Exception
 import java.lang.Character.MIN_VALUE as nullChar
@@ -26,8 +26,7 @@ class Confre(grammar: String) {
         if (grammar.isNotBlank()) {
             populateTerminals(grammar)
             populateNonTerminals(grammar)
-
-            // TODO: Validate that all references terminals / non-terminals exist
+            validateTerminalsAndNonTerminals()
         }
     }
 
@@ -163,6 +162,13 @@ class Confre(grammar: String) {
             NonTerminalRef(token.value, nonTerminals)
     }
 
+    private fun validateTerminalsAndNonTerminals() {
+        for (grammar in nonTerminals.values.map { it.grammar })
+            for (nonTermRef in grammar.treeWalk().filterIsInstance<NonTerminalRef>())
+                if (!nonTerminals.containsKey(nonTermRef.nonTerminalName))
+                    throw Exception("Reference to unknown terminal or non-terminal: '${nonTermRef.nonTerminalName}'")
+    }
+
 
     // Parsing
     private fun tokens(string: String, startIndex: Int): Sequence<Token> {
@@ -281,11 +287,8 @@ class Confre(grammar: String) {
     }
 
     private fun matchSequential(sequential: Sequential, tokens: BufferedIterator<Token>): ParseTree {
-        val accepts = sequential.expects(tokens.current())
-        if (accepts == false)
-            throw Exception("") // TODO Finish it
-        if (accepts == null)
-            return Node(sequential, sequential.body.map { null })
+        sequential.expects(tokens.current())
+            ?: return Node(sequential, sequential.body.map { null })
 
         val children = ArrayList<ParseTree?>()
         for (subElement in sequential.body)
@@ -316,7 +319,7 @@ class Confre(grammar: String) {
     private fun matchChoice(choice: Choice, tokens: BufferedIterator<Token>): ParseTree {
         val accepts = choice.expects(tokens.current())
         if (accepts == false)
-            throw Exception("") // TODO Finish it
+            throw Exception("Token '${tokens.current()}' could not satisfy any options in choice.")
 
         val subTree = dispatch(choice.options.first { it.expects(tokens.current()) == accepts }, tokens)
         val children = if (subTree.grammar is Sequential && subTree is Node) subTree.children
@@ -357,6 +360,7 @@ abstract class Grammar {
     // false = "This element cannot accept the token/terminal, resulting in a parse error"
     fun expects(token: Token): Boolean? = expects(token.terminal.id)
     abstract fun expects(nextTerminalID: Int): Boolean?
+    abstract fun treeWalk(): Sequence<Grammar>
 }
 
 class Sequential(val body: List<Grammar>) : Grammar() {
@@ -372,6 +376,9 @@ class Sequential(val body: List<Grammar>) : Grammar() {
     override fun toString(): String {
         return "Sequential(${body.joinToString(separator = " ")})"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+        = sequenceOf(this).plus(body.flatMap { it.treeWalk() })
 }
 
 class Optional(val body: Grammar) : Grammar() {
@@ -381,6 +388,9 @@ class Optional(val body: Grammar) : Grammar() {
     override fun toString(): String {
         return "Optional($body)"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+        = sequenceOf(this).plus(body.treeWalk())
 }
 
 class Multiple(val body: Grammar) : Grammar() {
@@ -390,6 +400,9 @@ class Multiple(val body: Grammar) : Grammar() {
     override fun toString(): String {
         return "Multiple($body)"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+        = sequenceOf(this).plus(body.treeWalk())
 }
 
 class Choice(val options: List<Grammar>) : Grammar() {
@@ -408,6 +421,9 @@ class Choice(val options: List<Grammar>) : Grammar() {
     override fun toString(): String {
         return "Choice(${options.joinToString(separator = " | ")})"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+            = sequenceOf(this).plus(options.flatMap { it.treeWalk() })
 }
 
 class TerminalRef(val terminalId: Int) : Grammar() {
@@ -417,6 +433,9 @@ class TerminalRef(val terminalId: Int) : Grammar() {
     override fun toString(): String {
         return "TerminalRef($terminalId)"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+        = sequenceOf(this)
 }
 
 class NonTerminalRef(val nonTerminalName: String, private val nonTerminals: Map<String, NonTerminal>) : Grammar() {
@@ -426,6 +445,9 @@ class NonTerminalRef(val nonTerminalName: String, private val nonTerminals: Map<
     override fun toString(): String {
         return "NonTerminalRef($nonTerminalName)"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+        = sequenceOf(this)
 }
 
 class Blank : Grammar() {
@@ -434,6 +456,9 @@ class Blank : Grammar() {
     override fun toString(): String {
         return "Blank()"
     }
+
+    override fun treeWalk(): Sequence<Grammar>
+        = sequenceOf(this)
 }
 
 
@@ -519,9 +544,6 @@ class Node(override val grammar: Grammar, val children: List<ParseTree?>) : Pars
     override fun isNotBlank() =  children.any { it?.isNotBlank() ?: false }
     override fun startPosition(): Int = children.first { it?.isNotBlank() ?: false }!!.startPosition()
     override fun endPosition(): Int = children.last { it?.isNotBlank() ?: false }!!.endPosition()
-
-    /** Get the inclusive start and end indices based on child indices in an IntRange object **/
-    fun range(firstChild: Int, lastChild: Int): IntRange = IntRange(children[firstChild]!!.startPosition(), children[lastChild]!!.endPosition())
 
     override fun preOrderWalk(): Sequence<ParseTree> = sequence{
         yield(this@Node)

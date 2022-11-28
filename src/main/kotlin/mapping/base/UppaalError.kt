@@ -1,69 +1,14 @@
-package engine.mapping
+package mapping.base
 
-import engine.mapping.pacha.PaChaMap
-import engine.parsing.Confre
-import engine.parsing.Node
-import engine.parsing.ParseTree
+import mapping.parsing.Confre
+import mapping.parsing.Node
+import mapping.parsing.ParseTree
 import jsonFy
 import unJsonFy
-import uppaal_pojo.*
-import kotlin.reflect.KType
-import kotlin.reflect.typeOf
 
-interface Mapper {
-    fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
-}
-
-data class ProcessInfo(var name: String, val template: String)
-abstract class ModelPhase {
-    val handlers = ArrayList<Triple<KType, List<Class<out UppaalPojo>>, Any>>()
-
-    protected inline fun <reified T : UppaalPojo> register(noinline handler: (List<PathNode>, T) -> List<UppaalError>, prefix: List<Class<out UppaalPojo>> = ArrayList()) {
-        handlers.add(Triple(typeOf<T>(), prefix.plus(T::class.java), handler))
-    }
-
-    inline fun <reified T : UppaalPojo> visit(path: List<PathNode>, element: T): List<UppaalError> {
-        for (handler in handlers.filter { it.first == typeOf<T>() })
-            if (pathMatchesFilter(handler.second, path))
-                @Suppress("UNCHECKED_CAST")
-                return (handler.third as (List<PathNode>, T) -> List<UppaalError>)(path, element)
-        return listOf()
-    }
-
-    fun pathMatchesFilter(pathFilter: List<Class<out UppaalPojo>>, path: List<PathNode>)
-        = path.size >= pathFilter.size
-            && path.takeLast(pathFilter.size).zip(pathFilter).all {
-                (node, filter) -> filter.isInstance(node.element)
-            }
-
-    abstract fun mapModelErrors(errors: List<UppaalError>): List<UppaalError>
-    abstract fun mapProcesses(processes: List<ProcessInfo>)
-}
-
-abstract class QueryPhase {
-    abstract fun mapQuery(query: String): Pair<String, UppaalError?>
-    abstract fun mapQueryError(error: UppaalError): UppaalError
-}
-
-@Suppress("MemberVisibilityCanBePrivate")
-class PathNode(val element: UppaalPojo, val index: Int? = null) {
-    override fun toString(): String {
-        return when (element) {
-            is Nta -> "nta"
-            is Name ->  "name"
-            is Parameter -> "parameter"
-            is Declaration -> "declaration"
-            is System -> "system"
-            is Template -> "template[${index ?: throw Exception("PathNode with Template has 'index == null'")}]"
-            is Transition -> "transition[${index ?: throw Exception("PathNode with Transition has 'index == null'")}]"
-            is Location ->  "location[${index ?: throw Exception("PathNode with Location has 'index == null'")}]"
-            is Label ->  "label[${index ?: throw Exception("PathNode with Label has 'index == null'")}]"
-            else -> throw Exception("PathNode cannot print unhandled UppaalPojo '${element::class.java.typeName}'")
-        }
-    }
-}
 
 class UppaalError {
+    @Suppress("MemberVisibilityCanBePrivate")
     val path: String
     var beginLine: Int
     var beginColumn: Int
@@ -142,6 +87,7 @@ class UppaalError {
         @JvmStatic
         fun fromJson(json: String, isUnrecoverable: Boolean = true): UppaalError {
             val errorTree = (errorGrammar.matchExact(json) as? Node) ?: throw Exception("Could not parse UppaalError from JSON: $json")
+            @Suppress("MemberVisibilityCanBePrivate")
             return UppaalError(
                 errorTree.children[3]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
                 errorTree.children[7]!!.toString().toInt(),
@@ -223,7 +169,7 @@ fun createUppaalError(path: List<PathNode>, message: String, isUnrecoverable: Bo
         = createUppaalError(path, "", IntRange.EMPTY, message, isUnrecoverable)
 
 fun createUppaalError(path: List<PathNode>, code: String, node: ParseTree, message: String, isUnrecoverable: Boolean = false): UppaalError
-    = createUppaalError(path, code, node.range(), message, isUnrecoverable)
+        = createUppaalError(path, code, node.range(), message, isUnrecoverable)
 
 fun createUppaalError(path: List<PathNode>, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalError {
     val linesAndColumns =
@@ -235,8 +181,4 @@ fun createUppaalError(path: List<PathNode>, code: String, range: IntRange, messa
         message, "",
         isUnrecoverable = isUnrecoverable
     )
-}
-
-data class Quadruple<A,B,C,D>(var first: A, var second: B, var third: C, var fourth: D) {
-    override fun toString(): String = "($first, $second, $third, $fourth)"
 }

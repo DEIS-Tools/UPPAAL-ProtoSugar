@@ -1,12 +1,12 @@
-package engine.mapping.txquan
+package mapping.mappers
 
-import engine.mapping.*
-import engine.parsing.Confre
-import engine.parsing.Leaf
+import mapping.base.*
+import mapping.parsing.Confre
+import mapping.parsing.Leaf
 
 class TxQuanMapper : Mapper {
-    override fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
-        = Pair(sequenceOf(), TxQuanQueryPhase())
+    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
+        = Triple(sequenceOf(), null, TxQuanQueryPhase())
 
     private class TxQuanQueryPhase : QueryPhase()
     {
@@ -86,8 +86,7 @@ class TxQuanMapper : Mapper {
             return Pair(latestQueryOutput, null)
         }
 
-        private fun naiveMap(query: String): String
-        {
+        private fun naiveMap(query: String): String {
             var offset = 0
             var newQuery = query
 
@@ -114,8 +113,7 @@ class TxQuanMapper : Mapper {
             return textualQuantifierStrings.contains(value)
         }
 
-        private fun registerBackMap(oldRange: IntRange, oldValue: String, newValue: String, offset: Int)
-        {
+        private fun registerBackMap(oldRange: IntRange, oldValue: String, newValue: String, offset: Int) {
             val newStart = oldRange.first + offset
             val newEnd = newStart + newValue.length - 1 // -1 for inclusive
             val newRange = IntRange(newStart, newEnd)
