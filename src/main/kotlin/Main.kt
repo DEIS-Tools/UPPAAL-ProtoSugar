@@ -1,6 +1,8 @@
 import engine.MapperEngine
+import engine.mapping.ProcessInfo
 import engine.mapping.UppaalError
 import engine.mapping.autoarr.AutoArrMapper
+import engine.mapping.createUppaalError
 import engine.mapping.pacha.PaChaMapper
 import engine.mapping.secomp.SeCompMapper
 import engine.mapping.txquan.TxQuanMapper
@@ -9,16 +11,20 @@ import engine.parsing.Node
 import java.io.*
 import java.lang.ProcessBuilder.Redirect
 import java.nio.charset.StandardCharsets
+import kotlin.io.path.Path
+import kotlin.io.path.absolutePathString
 import kotlin.system.exitProcess
 
 
-const val FILE_TAG = "-file"
-const val OUTPUT_TAG = "-output"
-const val SERVER_TAG = "-server"
-const val DEBUG_TAG = "-debug"
-const val MAPPERS_TAG = "-mappers"
+private const val crashDetailsFilePath = "ProtoSugar-CrashDetails.txt"
 
-val mappers = mapOf(
+private const val FILE_TAG = "-file"
+private const val OUTPUT_TAG = "-output"
+private const val SERVER_TAG = "-server"
+private const val DEBUG_TAG = "-debug"
+private const val MAPPERS_TAG = "-mappers"
+
+private val mappers = mapOf(
     Pair("PaCha",   PaChaMapper()),
     Pair("AutoArr", AutoArrMapper()),
     Pair("TxQuan", TxQuanMapper()),
@@ -26,9 +32,9 @@ val mappers = mapOf(
     //Pair("ChRef", null),
     //Pair("Hiera", null)
 )
-lateinit var engine: MapperEngine
+private lateinit var engine: MapperEngine
 
-val errorListGrammar = Confre("""
+private val errorListConfre = Confre("""
             INT = ([1-9][0-9]*)|0*
             STRING = "((\\.|[^\\"\n])*(")?)?
             
@@ -42,6 +48,23 @@ val errorListGrammar = Confre("""
                           '"ctx"'    ':' STRING
                       '}' .
         """.trimIndent())
+
+private val processListConfre = Confre("""
+            STRING = "((\\.|[^\\"\n])*(")?)?
+            
+            ProcList :== '"procs":' '[' Proc {',' Proc} ']' .
+            Proc     :== '{' '"name":' STRING ',' '"templ":' STRING ',' ArgList '}' .
+            ArgList  :== '"args":' '[' [Arg {',' Arg}] ']' .
+            Arg      :== '{' '"par":' STRING ',' '"v":' STRING '}' .
+        """.trimIndent())
+
+private const val modelCmdPrefix = "{\"cmd\":\"newXMLSystem3\",\"args\":\"" // Continues until: "}
+private const val queryCmdPrefix = "{\"cmd\":\"modelCheck\",\"args\":\""    // Continues until: "}
+
+private const val queryErrorResponsePrefix = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":" // Continues until: }}
+private const val modelErrorResponsePrefix = "{\"res\":\"error\",\"info\":{\"errors\":"              // Continues until: ]}}
+private const val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warnings\":"             // Continues until: ]}}
+
 
 fun main(args: Array<String>)
 {
@@ -61,7 +84,7 @@ fun main(args: Array<String>)
     }
 }
 
-fun getTags(args: Array<String>): Map<String, List<String>>
+private fun getTags(args: Array<String>): Map<String, List<String>>
 {
     val tags = HashMap<String, List<String>>()
 
@@ -85,7 +108,7 @@ fun getTags(args: Array<String>): Map<String, List<String>>
     return tags
 }
 
-fun getParams(argItr: Iterator<String>, count: Int): List<String>
+private fun getParams(argItr: Iterator<String>, count: Int): List<String>
 {
     if (count <= 0)
         return argItr.asSequence().toList()
@@ -100,7 +123,7 @@ fun getParams(argItr: Iterator<String>, count: Int): List<String>
 }
 
 
-fun runOnFile(inputFile: File, outputFile: File?)
+private fun runOnFile(inputFile: File, outputFile: File?)
 {
     val modelResult = engine.mapModel(inputFile.inputStream())
     if (modelResult.second.isNotEmpty()) {
@@ -118,90 +141,93 @@ fun runOnFile(inputFile: File, outputFile: File?)
 }
 
 
-fun tryRunOnServer(server: String)
+private fun tryRunOnServer(server: String)
 {
-    try { runServer(server) }
-    catch (ex: Exception) {
-        File("ProtoSugar-CrashDetails.txt").printWriter().use { out -> out.println(ex.toString()) }
-    }
+    try
+    { runServer(server) }
+    catch (ex: Exception)
+    { writeException(ex) }
 }
 
-fun runServer(server: String)
+private fun runServer(server: String)
 {
     val params = server.split(',').toTypedArray()
     val process = ProcessBuilder(*params)
         .redirectError(Redirect.INHERIT)
         .start()
 
-    val toEngineInput = System.`in`.bufferedReader(StandardCharsets.UTF_8)
-    val toEngineOutput = process.outputStream.bufferedWriter(StandardCharsets.UTF_8)
+    val toEngineInput = System.`in`.bufferedReader(StandardCharsets.UTF_8)           // GUI -> ProtoSugar
+    val toEngineOutput = process.outputStream.bufferedWriter(StandardCharsets.UTF_8) // ProtoSugar -> Engine
 
-    val toGuiInput = process.inputStream.bufferedReader(StandardCharsets.UTF_8)
-    val toGuiOutput = System.out.bufferedWriter(StandardCharsets.UTF_8)
+    val toGuiInput = process.inputStream.bufferedReader(StandardCharsets.UTF_8) // Engine -> ProtoSugar
+    val toGuiOutput = System.out.bufferedWriter(StandardCharsets.UTF_8)         // ProtoSugar -> GUI
 
     var latestModelErrors: List<UppaalError>? = null
-
     var toEngineBuffer = ""
-    val modelCmdPrefix = "{\"cmd\":\"newXMLSystem3\",\"args\":\""
-    val queryCmdPrefix = "{\"cmd\":\"modelCheck\",\"args\":\""
-
     var toGuiBuffer = ""
-    val queryErrorResponsePrefix = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":" // Continues until: "trace":null}}
-    val modelErrorResponsePrefix = "{\"res\":\"error\",\"info\":{\"errors\":" // Continues until: ]}}
-    val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warnings\":" // Continues until: ]}}
 
-    while (true)
-    {
-        while (toEngineInput.ready())
-        {
+    while (true) {
+        /* FROM GUI TO ENGINE */
+        while (toEngineInput.ready()) {
             val ch = toEngineInput.read()
-            if (toEngineBuffer.isEmpty() && ch.toChar() != '{')
-            {
+            if (toEngineBuffer.isEmpty() && ch.toChar() != '{') {
                 toEngineOutput.write(ch)
                 toEngineOutput.flush()
                 continue
             }
 
             toEngineBuffer += ch.toChar()
-            if (toEngineBuffer == modelCmdPrefix)
-            {
-                val modelResult = interceptModelCmd(toEngineInput)
-                @Suppress("LiftReturnOrAssignment")
-                if (modelResult.second.any { it.isUnrecoverable }) {
-                    toGuiOutput.write(generateModelErrorResponse(modelResult.second))
-                    toGuiOutput.flush()
+            if (toEngineBuffer == modelCmdPrefix) {
+                try {
                     latestModelErrors = null
+                    val modelResult = interceptModelCmd(toEngineInput)
+                    if (modelResult.second.any { it.isUnrecoverable }) {
+                        toGuiOutput.write(generateModelErrorResponse(modelResult.second))
+                        toGuiOutput.flush()
+                    }
+                    else {
+                        toEngineOutput.write(generateModelCommand(modelResult.first))
+                        toEngineOutput.flush()
+                        latestModelErrors = modelResult.second.ifEmpty { null }
+                    }
                 }
-                else {
-                    toEngineOutput.write(generateModelCommand(modelResult.first))
-                    toEngineOutput.flush()
-                    latestModelErrors = modelResult.second.ifEmpty { null }
+                catch (ex: Exception) {
+                    engine.clearCache()
+                    writeException(ex)
+                    handleServerModeException(toGuiOutput, "GUI model input lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = true)
                 }
-                toEngineBuffer = ""
+                finally {
+                    toEngineBuffer = ""
+                }
             }
-            else if (toEngineBuffer == queryCmdPrefix)
-            {
-                val queryResult = interceptQueryCmd(toEngineInput)
-                if (null != queryResult.second) {
-                    toGuiOutput.write(generateQueryErrorResponse(queryResult.second!!))
-                    toGuiOutput.flush()
+            else if (toEngineBuffer == queryCmdPrefix) {
+                try {
+                    val queryResult = interceptQueryCmd(toEngineInput)
+                    if (null != queryResult.second) {
+                        toGuiOutput.write(generateQueryErrorResponse(queryResult.second!!))
+                        toGuiOutput.flush()
+                    }
+                    else {
+                        toEngineOutput.write(generateQueryCommand(queryResult.first))
+                        toEngineOutput.flush()
+                    }
                 }
-                else {
-                    toEngineOutput.write(generateQueryCommand(queryResult.first))
-                    toEngineOutput.flush()
+                catch (ex: Exception) {
+                    handleServerModeException(toGuiOutput, "GUI query input lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = false)
                 }
-                toEngineBuffer = ""
+                finally {
+                    toEngineBuffer = ""
+                }
             }
-            else if (!modelCmdPrefix.startsWith(toEngineBuffer) && !queryCmdPrefix.startsWith(toEngineBuffer))
-            {
+            else if (!modelCmdPrefix.startsWith(toEngineBuffer) && !queryCmdPrefix.startsWith(toEngineBuffer)) {
                 toEngineOutput.write(toEngineBuffer)
                 toEngineOutput.flush()
                 toEngineBuffer = ""
             }
         }
 
-        while (toGuiInput.ready())
-        {
+        /* FROM ENGINE TO GUI */
+        while (toGuiInput.ready()) {
             val ch = toGuiInput.read()
 
             if (toGuiBuffer.isEmpty() && ch.toChar() != '{') {
@@ -211,32 +237,55 @@ fun runServer(server: String)
             }
 
             toGuiBuffer += ch.toChar()
-            if (toGuiBuffer == queryErrorResponsePrefix)
-            {
-                val queryError = interceptQueryErrorResponse(toGuiInput)
-                toGuiOutput.write(generateQueryErrorResponse(queryError))
-                toGuiOutput.flush()
-                toGuiBuffer = ""
-            }
-            else if (toGuiBuffer == modelErrorResponsePrefix)
-            {
-                val finalErrors = interceptModelErrorResponse(toGuiInput, latestModelErrors ?: listOf())
-                toGuiOutput.write(generateModelErrorResponse(finalErrors))
-                toGuiOutput.flush()
-                toGuiBuffer = ""
-                latestModelErrors = null
-            }
-            else if (toGuiBuffer == modelSuccessResponsePrefix)
-            {
-                if (latestModelErrors == null)
-                    toGuiOutput.write(toGuiBuffer)
-                else {
-                    interceptModelSuccessResponse(toGuiInput)
-                    toGuiOutput.write(generateModelErrorResponse(latestModelErrors))
+            if (toGuiBuffer == queryErrorResponsePrefix) {
+                try {
+                    val queryError = interceptQueryErrorResponse(toGuiInput)
+                    toGuiOutput.write(generateQueryErrorResponse(queryError))
+                    toGuiOutput.flush()
                 }
-                toGuiOutput.flush()
-                toGuiBuffer = ""
-                latestModelErrors = null
+                catch (ex: Exception) {
+                    writeException(ex)
+                    handleServerModeException(toGuiOutput, "Engine query error response lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = false)
+                }
+                finally {
+                    toGuiBuffer = ""
+                }
+            }
+            else if (toGuiBuffer == modelErrorResponsePrefix) {
+                try {
+                    val finalErrors = interceptModelErrorResponse(toGuiInput, latestModelErrors ?: listOf())
+                    toGuiOutput.write(generateModelErrorResponse(finalErrors))
+                    toGuiOutput.flush()
+                }
+                catch (ex: Exception) {
+                    writeException(ex)
+                    handleServerModeException(toGuiOutput, "Engine model error response lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = true)
+                }
+                finally {
+                    toGuiBuffer = ""
+                    latestModelErrors = null
+                }
+            }
+            else if (toGuiBuffer == modelSuccessResponsePrefix) {
+                try {
+                    if (latestModelErrors == null) {
+                        val newResponse = interceptModelSuccessResponse(toGuiInput, false)
+                        toGuiOutput.write(newResponse)
+                    }
+                    else {
+                        interceptModelSuccessResponse(toGuiInput, true) // Yes. Ignore output
+                        toGuiOutput.write(generateModelErrorResponse(latestModelErrors))
+                    }
+                    toGuiOutput.flush()
+                }
+                catch (ex: Exception) {
+                    writeException(ex)
+                    handleServerModeException(toGuiOutput, "Engine model success response lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = true)
+                }
+                finally {
+                    toGuiBuffer = ""
+                    latestModelErrors = null
+                }
             }
             else if (!queryErrorResponsePrefix.startsWith(toGuiBuffer)
                      && !modelErrorResponsePrefix.startsWith(toGuiBuffer)
@@ -252,29 +301,41 @@ fun runServer(server: String)
     }
 }
 
-fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
-{
-    var originalModel = ""
-    while (!originalModel.endsWith("\"}") || originalModel.endsWith("\\\"}"))
-        originalModel += input.read().toChar()
-    originalModel = originalModel.removeSuffix("\"}")
-
-    return engine.mapModel(originalModel.replace("\\\"", "\""))
+private fun handleServerModeException(toGuiOutput: BufferedWriter, message: String, useModelErrorResponse: Boolean) {
+    val error = createUppaalError(listOf(), message, true)
+    if (useModelErrorResponse)
+        toGuiOutput.write(generateModelErrorResponse(listOf(error)))
+    else
+        toGuiOutput.write(generateQueryErrorResponse(error))
+    toGuiOutput.flush()
 }
-fun generateModelCommand(model: String): String
-    = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.jsonFy()}\"}"
-fun interceptModelErrorResponse(input: BufferedReader, mapperErrors: List<UppaalError>): List<UppaalError>
+
+
+private fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalError>>
 {
-    var errors = ""
+    val originalModel = StringBuilder()
+    while (!originalModel.endsWith("\"}") || originalModel.endsWith("\\\"}"))
+        originalModel.append(input.read().toChar())
+
+    return engine.mapModel(
+        originalModel.toString().removeSuffix("\"}").unJsonFy()
+    )
+}
+private fun generateModelCommand(model: String): String
+    = "{\"cmd\":\"newXMLSystem3\",\"args\":\"${model.jsonFy()}\"}"
+
+private fun interceptModelErrorResponse(input: BufferedReader, mapperErrors: List<UppaalError>): List<UppaalError>
+{
+    val errors = StringBuilder()
     while (!errors.endsWith("}]") && !errors.endsWith("\\}]")) // '}]' marks end of error list
-        errors += input.read().toChar()
+        errors.append(input.read().toChar())
 
     // Throw away rest, including "warnings", since this is just ignored when errors are present
-    var throwaway = ""
+    val throwaway = StringBuilder()
     while (!throwaway.endsWith("]}}")) // ']}}' marks the end after warning-list and two object ends
-        throwaway += input.read().toChar()
+        throwaway.append(input.read().toChar())
 
-    val errorsTree = errorListGrammar.matchExact(errors) as Node
+    val errorsTree = errorListConfre.matchExact(errors.toString()) as Node
     val errorJsonList =
         listOf(errorsTree.children[1].toString()) // First error
             .plus( // For each child in multiple, for the second child in each of these, get string.
@@ -284,50 +345,84 @@ fun interceptModelErrorResponse(input: BufferedReader, mapperErrors: List<Uppaal
     val engineErrors = errorJsonList.map { UppaalError.fromJson(it) }
     return engine.mapModelErrors(engineErrors, mapperErrors)
 }
-fun interceptModelSuccessResponse(input: BufferedReader)
-{
-    var throwaway = ""
-    while (!throwaway.endsWith("]}}")) // Marks end after warning-list and two object ends
-        throwaway += input.read().toChar()
-}
-fun generateModelErrorResponse(errors: List<UppaalError>): String
+private fun generateModelErrorResponse(errors: List<UppaalError>): String
     = "{\"res\":\"error\",\"info\":{\"errors\":[${errors.joinToString(",")}],\"warnings\":[]}}"
 
-fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
+private fun interceptModelSuccessResponse(input: BufferedReader, suppressMapping: Boolean): String
 {
-    var query = ""
+    val successResponse = StringBuilder(modelSuccessResponsePrefix)
+    while (!successResponse.endsWith("]}}")) // Marks end after warning-list and two object ends
+        successResponse.append(input.read().toChar())
+
+    // Map process names
+    if (!suppressMapping) {
+        var successString = successResponse.toString()
+
+        val processListNode = processListConfre.find(successString, successString.indexOf("\"procs\":"))!!.asNode()
+        val processNodes = listOf(processListNode.children[2]!!.asNode()).plus(
+            processListNode.children[3]!!.asNode().children.map { it!!.asNode().children[1]!!.asNode() }
+        )
+        val namesAndTemplates = processNodes.map { ProcessInfo(
+            it.children[2]!!.asLeaf().token!!.value.drop(1).dropLast(1),
+            it.children[5]!!.asLeaf().token!!.value.drop(1).dropLast(1)
+        ) }
+        engine.mapProcesses(namesAndTemplates)
+
+        var offset = 0
+        for (processNode in processNodes.withIndex()) {
+            val nameRange = processNode.value.children[2]!!.range().offset(offset)
+            val oldName = processNode.value.children[2]!!.asLeaf().token!!.value
+            val newName = "\"${namesAndTemplates[processNode.index].name}\""
+
+            successString = successString.replaceRange(nameRange, newName)
+            offset += newName.length - oldName.length
+        }
+        return successString
+    }
+
+    return ""
+}
+
+private fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
+{
+    val query = StringBuilder()
     while (!query.endsWith("\"}") || query.endsWith("\\\"}"))
-        query += input.read().toChar()
-    query = query.removeSuffix("\"}")
+        query.append(input.read().toChar())
 
-    val result = engine.mapQuery(query.replace("\\\"", "\""))
-    val escapedQuery = result.first.replace("\"", "\\\"")
-
-    return Pair(escapedQuery, result.second)
+    val queryString = query.toString().removeSuffix("\"}").unJsonFy()
+    val result = engine.mapQuery(queryString)
+    return Pair(result.first.jsonFy(), result.second)
 }
-fun generateQueryCommand(query: String): String
+private fun generateQueryCommand(query: String): String
     = "{\"cmd\":\"modelCheck\",\"args\":\"${query.jsonFy()}\"}"
-fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
+
+private fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
 {
-    var error = ""
+    val error = StringBuilder()
     while (!error.endsWith("\"}") || error.endsWith("\\\"}"))
-        error += input.read().toChar()
+        error.append(input.read().toChar())
 
-    var throwaway = ""
-    while (!throwaway.endsWith("\"trace\":null}}"))
-        throwaway += input.read().toChar()
+    val throwaway = StringBuilder()
+    while (!throwaway.endsWith("}}"))
+        throwaway.append(input.read().toChar())
 
-    return engine.mapQueryError(UppaalError.fromJson(error))
+    return engine.mapQueryError(UppaalError.fromJson(error.toString()))
 }
-fun generateQueryErrorResponse(error: UppaalError): String
+private fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
 
 fun String.jsonFy()
-        = this.replace("\"", "\\\"")
-    .replace(":", "\\:")
+    = this.replace("\"", "\\\"").replace("\\", "\\\\")
+fun String.unJsonFy()
+        = this.replace("\\\"", "\"").replace("\\\\", "\\")
+fun IntRange.offset(offset: Int)
+    = (this.first + offset .. this.last + offset)
+
+private fun writeException(ex: Exception)
+    = File(crashDetailsFilePath).printWriter().use { out -> out.println("$ex\n${ex.stackTraceToString()}") }
 
 
-fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
+private fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
 {
     val params = server.split(',').toTypedArray()
     val process = ProcessBuilder(*params).start()
@@ -379,7 +474,7 @@ fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
 }
 
 
-fun usage()
+private fun usage()
 {
     println("usage: uppaal_mapper MODE MAPPERS")
     println("MODE: $FILE_TAG INPUT_XML_FILE_PATH [$OUTPUT_TAG OUTPUT_XML_FILE_PATH]")

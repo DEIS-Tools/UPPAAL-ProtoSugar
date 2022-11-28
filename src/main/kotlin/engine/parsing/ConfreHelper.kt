@@ -3,7 +3,11 @@ package engine.parsing
 @Suppress("MemberVisibilityCanBePrivate")
 class ConfreHelper {
     companion object {
-        val expressionGrammarString = """
+        val expressionGrammar = """
+                IDENT = [_a-zA-Z][_a-zA-Z0-9]*
+                INT = [0-9]+
+                BOOL = true|false
+            
                 Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) [(Binary|Assignment) Expression] .
                 Term       :== IDENT | INT | BOOL .
                 Unary      :== '+' | '-' | '!' | 'not' .
@@ -13,25 +17,39 @@ class ConfreHelper {
                 Array  :== '[' [Expression] ']' .
             """.trimIndent()
 
-        val partialInstantiationGrammar = Confre("""
-            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = [0-9]+
-            BOOL = true|false
+        // TODO: Support for structs?
+        val regularTypeAndExpressionGrammar = """
+            Type   :== ['const'] IDENT ['[' [Expression] ',' [Expression] ']' | '(' [Type] {',' [Type]} ')'] .
+            
+            $expressionGrammar
+        """.trimIndent()
 
+
+
+        val partialInstantiationConfre = Confre("""
             Instantiation :== IDENT ['(' [Params] ')'] '=' IDENT '(' [[Expression] {',' [Expression]}] ')' ';'.
+            Params :== [Type ['&'] IDENT {Array}] {',' [Type ['&'] IDENT {Array}]} .
             
-            Params :== [Type IDENT {Array}] {',' [Type IDENT {Array}]} .
-            Type   :== ['const'] IDENT ['[' [Expression] ',' [Expression] ']'].
-            
-            $expressionGrammarString
+            $regularTypeAndExpressionGrammar
         """.trimIndent())
 
-        val constIntGrammar = Confre(
+        val constIntConfre = Confre(
             """
-            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = -?[0-9]+
+            ConstInt :== 'const' 'int' ['[' [Expression] ',' [Expression] ']'] IDENT '=' Expression ';' .
             
-            ConstInt  :== 'const' 'int' IDENT '=' INT ';' .
+            $expressionGrammar
+        """.trimIndent())
+
+        val expressionAssignmentListConfre = Confre("""
+            ExprList :== Expression {',' Expression} .
+            
+            $expressionGrammar
+        """.trimIndent())
+
+        val systemLineConfre = Confre("""
+            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
+            
+            Param :== 'system' IDENT {',' IDENT} .
         """.trimIndent())
     }
 }

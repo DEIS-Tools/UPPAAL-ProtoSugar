@@ -510,6 +510,9 @@ interface ParseTree {
 
     fun preOrderWalk(): Sequence<ParseTree>
     fun postOrderWalk(): Sequence<ParseTree>
+
+    fun asNode(): Node = this as Node
+    fun asLeaf(): Leaf = this as Leaf
 }
 
 class Node(override val grammar: Grammar, val children: List<ParseTree?>) : ParseTree {

@@ -5,6 +5,7 @@ import engine.parsing.Confre
 import engine.parsing.Node
 import engine.parsing.ParseTree
 import jsonFy
+import unJsonFy
 import uppaal_pojo.*
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
@@ -13,6 +14,7 @@ interface Mapper {
     fun getPhases(): Pair<Sequence<ModelPhase>, QueryPhase?>
 }
 
+data class ProcessInfo(var name: String, val template: String)
 abstract class ModelPhase {
     val handlers = ArrayList<Triple<KType, List<Class<out UppaalPojo>>, Any>>()
 
@@ -35,6 +37,7 @@ abstract class ModelPhase {
             }
 
     abstract fun mapModelErrors(errors: List<UppaalError>): List<UppaalError>
+    abstract fun mapProcesses(processes: List<ProcessInfo>)
 }
 
 abstract class QueryPhase {
@@ -114,7 +117,7 @@ class UppaalError {
     }
 
     override fun toString(): String {
-        return """{"path":"$path","begln":$beginLine,"begcol":$beginColumn,"endln":$endLine,"endcol":$endColumn,"msg":"${message.jsonFy()}","ctx":"$context.jsonFy()"}"""
+        return """{"path":"$path","begln":$beginLine,"begcol":$beginColumn,"endln":$endLine,"endcol":$endColumn,"msg":"${message.jsonFy()}","ctx":"${context.jsonFy()}"}"""
     }
 
     companion object {
@@ -140,13 +143,13 @@ class UppaalError {
         fun fromJson(json: String, isUnrecoverable: Boolean = true): UppaalError {
             val errorTree = (errorGrammar.matchExact(json) as? Node) ?: throw Exception("Could not parse UppaalError from JSON: $json")
             return UppaalError(
-                errorTree.children[3]!!.toString().replace(startAndEndQuotePattern, ""),
+                errorTree.children[3]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
                 errorTree.children[7]!!.toString().toInt(),
                 errorTree.children[11]!!.toString().toInt(),
                 errorTree.children[15]!!.toString().toInt(),
                 errorTree.children[19]!!.toString().toInt(),
-                errorTree.children[23]!!.toString().replace(startAndEndQuotePattern, ""),
-                errorTree.children[27]!!.toString().replace(startAndEndQuotePattern, ""),
+                errorTree.children[23]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
+                errorTree.children[27]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
                 isUnrecoverable
             )
         }
@@ -216,11 +219,16 @@ fun getRangeFromLinesAndColumns(text: String, lineStart: Int, columnStart: Int, 
     }
 }
 
+fun createUppaalError(path: List<PathNode>, message: String, isUnrecoverable: Boolean = false): UppaalError
+        = createUppaalError(path, "", IntRange.EMPTY, message, isUnrecoverable)
+
 fun createUppaalError(path: List<PathNode>, code: String, node: ParseTree, message: String, isUnrecoverable: Boolean = false): UppaalError
     = createUppaalError(path, code, node.range(), message, isUnrecoverable)
 
 fun createUppaalError(path: List<PathNode>, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalError {
-    val linesAndColumns = getLinesAndColumnsFromRange(code, range)
+    val linesAndColumns =
+        if (range != IntRange.EMPTY) getLinesAndColumnsFromRange(code, range)
+        else Quadruple(0,0,0,0)
     return UppaalError(path,
         linesAndColumns.first, linesAndColumns.second,
         linesAndColumns.third, linesAndColumns.fourth,

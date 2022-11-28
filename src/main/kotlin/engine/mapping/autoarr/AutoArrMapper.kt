@@ -10,23 +10,19 @@ class AutoArrMapper : Mapper {
         = Pair(sequenceOf(Phase1()), null)
 
     private class Phase1 : ModelPhase() {
-        private val arrayGrammar = Confre(
-            """
-            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = [0-9]+
-            BOOL = true|false
-            
+        private val arrayConfre = Confre(
+            """            
             AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' (INT | IDENT) ']'} '=' '{' [IDENT {',' IDENT}] '->' Expression '}' ';' .
             
-            ${ConfreHelper.expressionGrammarString}
+            ${ConfreHelper.expressionGrammar}
         """.trimIndent())
+
 
         init {
             register(::mapDeclaration)
             register(::mapSystem)
         }
 
-        override fun mapModelErrors(errors: List<UppaalError>) = errors // TODO: Filter/trans-locate errors on duplicated array elements?
 
         private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
             val (newDecl, errors) = mapAutoArrayInstantiations(declaration.content, path)
@@ -45,7 +41,7 @@ class AutoArrMapper : Mapper {
             var offset = 0
             var newCode = code
             
-            for (autoArr in arrayGrammar.findAll(code).map { it as Node }) {
+            for (autoArr in arrayConfre.findAll(code).map { it as Node }) {
                 val dimSizes = getDimensionSizes(autoArr, code)
                 val dimVars  = getDimensionVariables(autoArr)
                 val dimErrors = handleDimensionErrors(dimSizes, dimVars, path, code, autoArr)
@@ -68,10 +64,10 @@ class AutoArrMapper : Mapper {
         private fun getConstantInts(code: String): ArrayList<Triple<IntRange, String, Int>> {
             // TODO: Allow constant ARRAY-variables as size parameter? Constants that are computable?
             val constInts = ArrayList<Triple<IntRange, String, Int>>()
-            for (constInt in ConfreHelper.constIntGrammar.findAll(code).map { it as Node }) {
+            for (constInt in ConfreHelper.constIntConfre.findAll(code).map { it as Node }) {
                 val range = IntRange(constInt.startPosition(), constInt.endPosition())
-                val name = constInt.children[2]!!.toString()
-                val value = constInt.children[4]!!.toString().toInt()
+                val name = constInt.children[3]!!.toString()
+                val value = code.substring(constInt.children[5]!!.range()).toIntOrNull() ?: continue
                 constInts.add(Triple(range, name, value))
             }
             return constInts
@@ -146,5 +142,11 @@ class AutoArrMapper : Mapper {
             val singleDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)($currDimVar)(?>[^_a-zA-Z0-9\[]|$)""")
             return singleDimPattern.replace(value) { it.value.replace(currDimVar, index.toString()) }
         }
+
+
+        override fun mapModelErrors(errors: List<UppaalError>) = errors // TODO: Filter/trans-locate errors on duplicated array elements?
+
+
+        override fun mapProcesses(processes: List<ProcessInfo>) { }
     }
 }

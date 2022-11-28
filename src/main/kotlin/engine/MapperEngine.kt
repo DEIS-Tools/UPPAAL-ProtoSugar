@@ -17,6 +17,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
     private var modelPhases: List<ModelPhase>? = null
     private var queryPhases: List<QueryPhase>? = null
 
+
     fun mapModel(stream: InputStream): Pair<String, List<UppaalError>>
         = stream.bufferedReader().use { return mapModel(it.readText()) }
     fun mapModel(uppaalXml: String): Pair<String, List<UppaalError>> {
@@ -37,7 +38,12 @@ class MapperEngine(private val mappers: List<Mapper>) {
     fun mapModelErrors(engineErrors: List<UppaalError>, mapperErrors: List<UppaalError>): List<UppaalError> {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
-        return reversePhases.fold(engineErrors.plus(mapperErrors)) { errors, mapper -> mapper.mapModelErrors(errors) }
+        return reversePhases.fold(mapperErrors.plus(engineErrors)) { errors, mapper -> mapper.mapModelErrors(errors) }
+    }
+    fun mapProcesses(processes: List<ProcessInfo>) {
+        // Mapped in reverse order since the error is based on the last modelPhase's result
+        val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
+        reversePhases.forEach { it.mapProcesses(processes) }
     }
 
     fun mapQuery(query: String): Pair<String, UppaalError?> {
@@ -103,4 +109,10 @@ class MapperEngine(private val mappers: List<Mapper>) {
     private fun visitTransition(transition: Transition, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
         phase.visit(path, transition)
             .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(PathNode(it.value, it.index)), it.value) })
+
+
+    fun clearCache() {
+        modelPhases = null
+        queryPhases = null
+    }
 }

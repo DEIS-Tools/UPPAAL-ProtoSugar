@@ -4,11 +4,10 @@ import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Element
 import org.simpleframework.xml.ElementList
 import org.simpleframework.xml.Root
-import java.util.*
 import kotlin.collections.ArrayList
 
 @Root(name = "transition")
-class Transition() : UppaalPojo {
+class Transition() : UppaalPojo { // Primary constructor needed for XML deserialization
     @field:Attribute(name = "id")
     lateinit var id: String
 
