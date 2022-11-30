@@ -44,7 +44,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
 
         for (mapper in mappers.map { it.getPhases() }) {
             for (phase in mapper.first) {
-                val newErrors = visitNta(nta, listOf(PathNode(nta)), phase)
+                val newErrors = visitNta(nta, UppaalPath(nta), phase)
                 errors.addAll(newErrors)
                 if (newErrors.any { it.isUnrecoverable })
                     return errors
@@ -65,31 +65,29 @@ class MapperEngine(private val mappers: List<Mapper>) {
 
         return errors
     }
-    private fun visitNta(nta: Nta, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
-        phase.visit(path, nta).plus(phase.visit(path.plus(PathNode(nta.declaration)), nta.declaration))
+    private fun visitNta(nta: Nta, path: UppaalPath, phase: ModelPhase): List<UppaalError> =
+        phase.visit(path, nta).plus(phase.visit(path.plus(nta.declaration), nta.declaration))
             .plus(nta.templates.withIndex().flatMap
-            { (index, template) -> visitTemplate(template, path.plus(PathNode(template, index+1)), phase) }
+            { visitTemplate(it.value, path.plus(it), phase) }
             )
-            .plus(phase.visit(path.plus(PathNode(nta.system)), nta.system))
-    private fun visitTemplate(template: Template, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
+            .plus(phase.visit(path.plus(nta.system), nta.system))
+    private fun visitTemplate(template: Template, path: UppaalPath, phase: ModelPhase): List<UppaalError> =
         phase.visit(path, template).asSequence()
-            .plus(phase.visit(path.plus(PathNode(template.name)), template.name))
-            .plus((template.parameter?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf()))
-            .plus(template.declaration?.let { phase.visit(path.plus(PathNode(it)), it) } ?: listOf())
+            .plus(phase.visit(path.plus(template.name), template.name))
+            .plus((template.parameter?.let { phase.visit(path.plus(it), it) } ?: listOf()))
+            .plus(template.declaration?.let { phase.visit(path.plus(it), it) } ?: listOf())
             .plus(
-                template.locations.flatMap { phase.visit(path.plus(PathNode(it)), it) }
+                template.locations.flatMap { phase.visit(path.plus(it), it) }
             )
             .plus(
-                template.branchpoint.flatMap { phase.visit(path.plus(PathNode(it)), it) }
+                template.branchpoint.flatMap { phase.visit(path.plus(it), it) }
             )
             .plus(
-                template.transitions.withIndex().flatMap { (index, transition) -> visitTransition(transition, path.plus(
-                    PathNode(transition, index+1)
-                ), phase) }
+                template.transitions.withIndex().flatMap { visitTransition(it.value, path.plus(it), phase) }
             ).toList()
-    private fun visitTransition(transition: Transition, path: List<PathNode>, phase: ModelPhase): List<UppaalError> =
+    private fun visitTransition(transition: Transition, path: UppaalPath, phase: ModelPhase): List<UppaalError> =
         phase.visit(path, transition)
-            .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(PathNode(it.value, it.index)), it.value) })
+            .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(it), it.value) })
 
 
     fun mapModelErrors(engineErrors: List<UppaalError>, mapperErrors: List<UppaalError>): List<UppaalError> {

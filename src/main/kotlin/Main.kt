@@ -297,7 +297,7 @@ private fun runServer(server: String)
 }
 
 private fun handleServerModeException(toGuiOutput: BufferedWriter, message: String, useModelErrorResponse: Boolean) {
-    val error = createUppaalError(listOf(), message, true)
+    val error = createUppaalError(UppaalPath(), message, true)
     if (useModelErrorResponse)
         toGuiOutput.write(generateModelErrorResponse(listOf(error)))
     else
@@ -406,12 +406,10 @@ private fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
 private fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
 
-fun String.jsonFy()
-    = this.replace("\\", "\\\\").replace("\"", "\\\"")
-fun String.unJsonFy()
-        = this.replace("\\\"", "\"").replace("\\\\", "\\")
-fun IntRange.offset(offset: Int)
-    = (this.first + offset .. this.last + offset)
+fun String.jsonFy() = this.replace("\\", "\\\\").replace("\"", "\\\"")
+fun String.unJsonFy() = this.replace("\\\"", "\"").replace("\\\\", "\\")
+fun IntRange.offset(offset: Int) = (this.first + offset .. this.last + offset)
+fun IntRange.length() = this.last - this.first + 1
 
 private fun writeException(ex: Exception)
     = File(crashDetailsFilePath).printWriter().use { out -> out.println("$ex\n${ex.stackTraceToString()}") }

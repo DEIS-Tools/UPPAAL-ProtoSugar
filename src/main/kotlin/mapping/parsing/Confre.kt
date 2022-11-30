@@ -127,11 +127,11 @@ class Confre(grammar: String) {
                 val terminal = token.terminal
                 when (terminal.id) {
                     /* Identifier */ 0 -> sequence.add(determineTerminalOrNonTerminal(token))
-                    /* String */     1 -> sequence.add(TerminalRef(terminals.filterIsInstance<AnonymousTerminal>().find { it.value == token.value.trim('\'').replace("\\'", "'") }!!.id))
+                    /* String */     1 -> sequence.add(TerminalRef(terminals.filterIsInstance<AnonymousTerminal>().find { it.value == token.value.drop(1).dropLast(1).replace("\\'", "'") }!!.id))
                     /* Group */      2 -> sequence.add(parseBody(choiceParts.next() as Node))
                     /* Optional */   4 -> sequence.add(Optional(parseBody(choiceParts.next() as Node)))
                     /* Multiple */   6 -> sequence.add(Multiple(parseBody(choiceParts.next() as Node)))
-                    /* Other */      else -> throw Exception("") // TODO Finish here
+                    /* Other */      else -> throw Exception("Confre parser cannot dispatch unknown grammar construct: '$token'")
                 }
             }
             result = if (sequence.size > 1) Sequential(sequence) else sequence[0]

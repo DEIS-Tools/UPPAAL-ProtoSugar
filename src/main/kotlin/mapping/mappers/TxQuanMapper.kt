@@ -3,6 +3,7 @@ package mapping.mappers
 import mapping.base.*
 import mapping.parsing.Confre
 import mapping.parsing.Leaf
+import mapping.parsing.ParseTree
 
 class TxQuanMapper : Mapper {
     override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
@@ -53,14 +54,14 @@ class TxQuanMapper : Mapper {
 
 
         override fun mapQuery(query: String): Pair<String, UppaalError?> {
-            latestQueryInput = query
             backMapToOriginalValue.clear()
-            val queryTree = queryGrammar.matchExact(query)
-            if (null == queryTree) {
-                latestQueryOutput = naiveMap(query)
-                return Pair(latestQueryOutput, null)
-            }
+            latestQueryOutput =
+                queryGrammar.matchExact(query)?.let { smartMap(query, it) }
+                ?: naiveMap(query)
+            return Pair(latestQueryOutput, null)
+        }
 
+        private fun smartMap(query: String, queryTree: ParseTree): String {
             val textualQuantifierLeaves = queryTree
                 .postOrderWalk()
                 .filterIsInstance<Leaf>()
@@ -82,8 +83,7 @@ class TxQuanMapper : Mapper {
                 }
             }
 
-            latestQueryOutput = newQuery
-            return Pair(latestQueryOutput, null)
+            return newQuery
         }
 
         private fun naiveMap(query: String): String {
@@ -105,6 +105,7 @@ class TxQuanMapper : Mapper {
                 registerBackMap(toReplace.range, toReplace.value, replacement, offset)
                 offset += replacement.length - toReplace.value.length
             }
+
             return newQuery
         }
 
@@ -125,21 +126,12 @@ class TxQuanMapper : Mapper {
 
 
         override fun mapQueryError(error: UppaalError): UppaalError {
-            val errorRange = getRangeFromLinesAndColumns(
-                latestQueryOutput,
-                error.beginLine, error.beginColumn,
-                error.endLine, error.endColumn
-            )
+            val errorRange = error.range.toIntRange(latestQueryOutput)
 
             // If an error relates to a mapped element
             val backMap = backMapToOriginalValue.find { it.first.first == errorRange.first && it.first.last == errorRange.last }
             if (null != backMap) {
-                val backMappedErrorLocation = getLinesAndColumnsFromRange(latestQueryInput, backMap.third, 0)
-                error.beginLine = backMappedErrorLocation.first
-                error.beginColumn = backMappedErrorLocation.second
-                error.endLine = backMappedErrorLocation.third
-                error.endColumn = backMappedErrorLocation.fourth
-
+                error.range = LineColumnRange.fromIntRange(latestQueryInput, backMap.third)
                 error.context = backMap.second
             }
 

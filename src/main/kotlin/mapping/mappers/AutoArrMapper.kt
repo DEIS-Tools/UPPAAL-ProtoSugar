@@ -24,19 +24,19 @@ class AutoArrMapper : Mapper {
         }
 
 
-        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
+        private fun mapDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
             val (newDecl, errors) = mapAutoArrayInstantiations(declaration.content, path)
             declaration.content = newDecl
             return errors
         }
 
-        private fun mapSystem(path: List<PathNode>, system: System): List<UppaalError> {
+        private fun mapSystem(path: UppaalPath, system: System): List<UppaalError> {
             val (newDecl, errors) = mapAutoArrayInstantiations(system.content, path)
             system.content = newDecl
             return errors
         }
 
-        private fun mapAutoArrayInstantiations(code: String, path: List<PathNode>): Pair<String, List<UppaalError>> {
+        private fun mapAutoArrayInstantiations(code: String, path: UppaalPath): Pair<String, List<UppaalError>> {
             val errors = ArrayList<UppaalError>()
             var offset = 0
             var newCode = code
@@ -97,7 +97,7 @@ class AutoArrMapper : Mapper {
             return varNameNodes.map { it.toString() }.withIndex().map { if (it.value == "_") it.index.toString() else it.value }
         }
 
-        private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String>, path: List<PathNode>, code: String, autoArr: Node): Collection<UppaalError> {
+        private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String>, path: UppaalPath, code: String, autoArr: Node): Collection<UppaalError> {
             val errors = ArrayList<UppaalError>()
             if (dimSizes.isEmpty())
                 errors.add(

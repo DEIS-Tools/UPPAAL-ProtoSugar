@@ -2,6 +2,7 @@ package mapping.mappers
 
 import mapping.base.*
 import mapping.parsing.*
+import offset
 import uppaal_pojo.*
 import uppaal_pojo.Declaration
 import java.lang.Character.MIN_VALUE as nullChar
@@ -18,7 +19,7 @@ class PaChaMapper : Mapper {
     {
         private val PARAMETER_TYPE_HINT = "PARAM_TYPE"
 
-        private val backMaps = HashMap<Quadruple<Int, Int, Int, Int>, Pair<Quadruple<Int, Int, Int, Int>, String>>()
+        private val backMaps = HashMap<LineColumnRange, Pair<LineColumnRange, String>>()
         private val paChaMaps: HashMap<String?, PaChaMap> = hashMapOf(Pair(null, PaChaMap()))
 
 
@@ -48,15 +49,15 @@ class PaChaMapper : Mapper {
         }
 
 
-        private fun registerTemplatePaChaMap(path: List<PathNode>, template: Template): List<UppaalError> {
-            paChaMaps[
-                template.name.content ?: return listOf(UppaalError(path, 1,1,1,1, "Template has no name.", "", isUnrecoverable = true))
-            ] = PaChaMap()
+        private fun registerTemplatePaChaMap(path: UppaalPath, template: Template): List<UppaalError> {
+            val templateName = template.name.content
+                ?: return listOf(createUppaalError(path, "Template has no name.", isUnrecoverable = true))
+            paChaMaps[templateName] = PaChaMap()
             return listOf()
         }
 
 
-        private fun mapDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
+        private fun mapDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
             val parent = path.takeLast(2).first().element
             val paChaMap = paChaMaps[(parent as? Template)?.name?.content]!!
 
@@ -65,7 +66,7 @@ class PaChaMapper : Mapper {
             return errors
         }
 
-        private fun mapParameter(path: List<PathNode>, parameter: Parameter): List<UppaalError> {
+        private fun mapParameter(path: UppaalPath, parameter: Parameter): List<UppaalError> {
             val template = path.takeLast(2).first().element as Template
             val paChaMap = paChaMaps[template.name.content]!!
 
@@ -74,7 +75,7 @@ class PaChaMapper : Mapper {
             return errors
         }
 
-        private fun mapTransition(path: List<PathNode>, transition: Transition): List<UppaalError> {
+        private fun mapTransition(path: UppaalPath, transition: Transition): List<UppaalError> {
             val sync: Label = transition.labels.find { it.kind == "synchronisation" } ?: return listOf()
             val update: Label = transition.labels.find { it.kind == "assignment" }
                                 ?: Label("assignment", sync.x, sync.y + 17)
@@ -86,12 +87,12 @@ class PaChaMapper : Mapper {
             if (!transition.labels.contains(update))
                 transition.labels.add(update)
 
-            val syncPath = path.plus(PathNode(sync, transition.labels.indexOf(sync) + 1))
-            val updatePath = path.plus(PathNode(sync, transition.labels.indexOf(update) + 1))
+            val syncPath = path.plus(sync, transition.labels.indexOf(sync) + 1)
+            val updatePath = path.plus(update, transition.labels.indexOf(update) + 1)
             return mapEmitOrReceive(syncPath, updatePath, match, sync, update, templatePaChas)
         }
 
-        private fun mapSystem(path: List<PathNode>, system: System): List<UppaalError> {
+        private fun mapSystem(path: UppaalPath, system: System): List<UppaalError> {
             val (newContentPartial, errorsFirst) = mapPaChaDeclarations(path, system.content, paChaMaps[null]!!)
             val (newContentFull, errorsSecond) = mapTemplateInstantiations(path, newContentPartial)
             system.content = newContentFull
@@ -99,7 +100,7 @@ class PaChaMapper : Mapper {
         }
 
 
-        private fun mapPaChaDeclarations(path: List<PathNode>, code: String, scope: PaChaMap, mapInPartialInstantiationIndex: Int = -1): Pair<String, List<UppaalError>> {
+        private fun mapPaChaDeclarations(path: UppaalPath, code: String, scope: PaChaMap, mapInPartialInstantiationIndex: Int = -1): Pair<String, List<UppaalError>> {
             val inParameterList = mapInPartialInstantiationIndex != -1 || (path.last().element is Parameter) // In "system/declaration" or in "parameter"
             val errors = ArrayList<UppaalError>()
             var offset = 0
@@ -151,12 +152,11 @@ class PaChaMapper : Mapper {
                         newCode = newCode.replaceRange(insertPosition, insertPosition, parameterVariableDecl)
 
                         // To map "unknown type" errors back to new syntax
+                        val baseRange = IntRange(insertPosition, insertPosition + typeName.length-1)
                         val newLinesAndColumns =
-                            if (inParameterList)
-                                getLinesAndColumnsFromRange(newCode, IntRange(insertPosition+2, insertPosition+2 + typeName.length-1))
-                            else
-                                getLinesAndColumnsFromRange(newCode, IntRange(insertPosition+6, insertPosition+6 + typeName.length-1))
-                        backMaps[newLinesAndColumns] = Pair(getLinesAndColumnsFromRange(code, pair.value.range()), PARAMETER_TYPE_HINT)
+                            if (inParameterList) LineColumnRange.fromIntRange(newCode, baseRange.offset(2))
+                            else LineColumnRange.fromIntRange(newCode, baseRange.offset(6))
+                        backMaps[newLinesAndColumns] = Pair(LineColumnRange.fromIntRange(code, pair.value.range()), PARAMETER_TYPE_HINT)
 
                         // Update
                         offset += parameterVariableDecl.length
@@ -191,7 +191,7 @@ class PaChaMapper : Mapper {
             return Pair(newCode, errors)
         }
 
-        private fun isPaChaDecl(path: List<PathNode>, code: String, decl: Node, errors: ArrayList<UppaalError>): Boolean {
+        private fun isPaChaDecl(path: UppaalPath, code: String, decl: Node, errors: ArrayList<UppaalError>): Boolean {
             val nameNode = decl.children[0]!!
             val typeListNode = decl.children[1]!!
             if (nameNode.toString() == "chan")
@@ -202,7 +202,7 @@ class PaChaMapper : Mapper {
             return false
         }
 
-        private fun checkSemicolon(path: List<PathNode>, code: String, chan: Node, errors: ArrayList<UppaalError>): Boolean {
+        private fun checkSemicolon(path: UppaalPath, code: String, chan: Node, errors: ArrayList<UppaalError>): Boolean {
             if (chan.children[5]!!.isBlank()) {
                 errors.add(createUppaalError(path, code, chan, "Missing semicolon after channel declaration."))
                 return true
@@ -210,7 +210,7 @@ class PaChaMapper : Mapper {
             return false
         }
 
-        private fun checkTypes(path: List<PathNode>, originalCode: String, types: List<Node>, typeListRange: IntRange): List<UppaalError> {
+        private fun checkTypes(path: UppaalPath, originalCode: String, types: List<Node>, typeListRange: IntRange): List<UppaalError> {
             val errors = ArrayList<UppaalError>()
             for (type in types.map { it.children[0] as? Node })
                 if (type == null || type.isBlank())
@@ -252,7 +252,7 @@ class PaChaMapper : Mapper {
         }
 
 
-        private fun mapEmitOrReceive(syncPath: List<PathNode>, updatePath: List<PathNode>, match: Node, sync: Label, update: Label, scope: PaChaMap): List<UppaalError>
+        private fun mapEmitOrReceive(syncPath: UppaalPath, updatePath: UppaalPath, match: Node, sync: Label, update: Label, scope: PaChaMap): List<UppaalError>
         {
             val errors = ArrayList<UppaalError>()
             val channelName = match.children[0]!!.toString()
@@ -343,7 +343,7 @@ class PaChaMapper : Mapper {
             return args
         }
 
-        private fun extractChanArgs(syncPath: List<PathNode>, errors: ArrayList<UppaalError>, argList: List<Node>, originalSync: String, nameNode: ParseTree): List<String?>
+        private fun extractChanArgs(syncPath: UppaalPath, errors: ArrayList<UppaalError>, argList: List<Node>, originalSync: String, nameNode: ParseTree): List<String?>
         {
             var blankArgument = false
             val args = ArrayList<String?>()
@@ -365,7 +365,7 @@ class PaChaMapper : Mapper {
             return args
         }
 
-        private fun extractChanParams(syncPath: List<PathNode>, errors: ArrayList<UppaalError>, paramList: List<Node>, originalSync: String, nameNode: ParseTree): List<Pair<Boolean, String>?>
+        private fun extractChanParams(syncPath: UppaalPath, errors: ArrayList<UppaalError>, paramList: List<Node>, originalSync: String, nameNode: ParseTree): List<Pair<Boolean, String>?>
         {
             var blankParameter = false
             val params = ArrayList<Pair<Boolean, String>?>()
@@ -402,7 +402,7 @@ class PaChaMapper : Mapper {
         }
 
 
-        private fun mapTemplateInstantiations(path: List<PathNode>, system: String): Pair<String, List<UppaalError>>
+        private fun mapTemplateInstantiations(path: UppaalPath, system: String): Pair<String, List<UppaalError>>
         {
             val globalPaChas = paChaMaps[null]!!
             val errors = ArrayList<UppaalError>()
@@ -503,13 +503,9 @@ class PaChaMapper : Mapper {
 
         override fun mapModelErrors(errors: List<UppaalError>): List<UppaalError> {
             for (error in errors.filter { it.fromEngine }) {
-                val linesAndColumns = Quadruple(error.beginLine, error.beginColumn, error.endLine, error.endColumn)
-                val backMap = backMaps[linesAndColumns] ?: continue
+                val backMap = backMaps[error.range] ?: continue
                 if (backMap.second == PARAMETER_TYPE_HINT) {
-                    error.beginLine = backMap.first.first
-                    error.beginColumn = backMap.first.second
-                    error.endLine = backMap.first.third
-                    error.endColumn = backMap.first.fourth
+                    error.range = backMap.first
                     error.message = "Unknown type name in channel parameter."
                 }
                 else

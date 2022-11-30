@@ -10,59 +10,34 @@ import unJsonFy
 class UppaalError {
     @Suppress("MemberVisibilityCanBePrivate")
     val path: String
-    var beginLine: Int
-    var beginColumn: Int
-    var endLine: Int
-    var endColumn: Int
+    var range: LineColumnRange
     var message: String
     var context: String
     val isUnrecoverable: Boolean
     val fromEngine: Boolean // If false -> is from mapper
 
-    constructor(
-        pathList: List<PathNode>,
-        beginLine: Int,
-        beginColumn: Int,
-        endLine: Int,
-        endColumn: Int,
-        message: String,
-        context: String,
-        isUnrecoverable: Boolean
-    ) {
-        this.path = pathList.joinToString("/")
-        this.beginLine = beginLine
-        this.beginColumn = beginColumn
-        this.endLine = endLine
-        this.endColumn = endColumn
+    constructor(path: UppaalPath, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean) {
+        this.path = path.toString()
+        this.range = range
         this.message = message
         this.context = context
         this.isUnrecoverable = isUnrecoverable
+
         this.fromEngine = false
     }
 
-    constructor(
-        path: String,
-        beginLine: Int,
-        beginColumn: Int,
-        endLine: Int,
-        endColumn: Int,
-        message: String,
-        context: String,
-        isUnrecoverable: Boolean
-    ) {
+    constructor(path: String, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean) {
         this.path = path
-        this.beginLine = beginLine
-        this.beginColumn = beginColumn
-        this.endLine = endLine
-        this.endColumn = endColumn
+        this.range = range
         this.message = message
         this.context = context
         this.isUnrecoverable = isUnrecoverable
+
         this.fromEngine = true
     }
 
     override fun toString(): String {
-        return """{"path":"$path","begln":$beginLine,"begcol":$beginColumn,"endln":$endLine,"endcol":$endColumn,"msg":"${message.jsonFy()}","ctx":"${context.jsonFy()}"}"""
+        return """{"path":"$path","begln":${range.beginLine},"begcol":${range.beginColumn},"endln":${range.endLine},"endcol":${range.endColumn},"msg":"${message.jsonFy()}","ctx":"${context.jsonFy()}"}"""
     }
 
     companion object {
@@ -82,103 +57,34 @@ class UppaalError {
         """.trimIndent())
 
         @JvmStatic
-        private val startAndEndQuotePattern = Regex("""^.|.$""")
-
-        @JvmStatic
         fun fromJson(json: String, isUnrecoverable: Boolean = true): UppaalError {
             val errorTree = (errorGrammar.matchExact(json) as? Node) ?: throw Exception("Could not parse UppaalError from JSON: $json")
             @Suppress("MemberVisibilityCanBePrivate")
             return UppaalError(
-                errorTree.children[3]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
-                errorTree.children[7]!!.toString().toInt(),
-                errorTree.children[11]!!.toString().toInt(),
-                errorTree.children[15]!!.toString().toInt(),
-                errorTree.children[19]!!.toString().toInt(),
-                errorTree.children[23]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
-                errorTree.children[27]!!.toString().replace(startAndEndQuotePattern, "").unJsonFy(),
+                errorTree.children[3]!!.toString().drop(1).dropLast(1).unJsonFy(),
+                LineColumnRange(
+                    errorTree.children[7]!!.toString().toInt(),
+                    errorTree.children[11]!!.toString().toInt(),
+                    errorTree.children[15]!!.toString().toInt(),
+                    errorTree.children[19]!!.toString().toInt()
+                ),
+                errorTree.children[23]!!.toString().drop(1).dropLast(1).unJsonFy(),
+                errorTree.children[27]!!.toString().drop(1).dropLast(1).unJsonFy(),
                 isUnrecoverable
             )
         }
     }
 }
 
-/** This is defined alongside the "UppaalError" class to help generate the start/end line/column values needed for errors **/
-fun getLinesAndColumnsFromRange(text: String, range: IntRange, rangeOffset: Int = 0): Quadruple<Int, Int, Int, Int>
-{
-    val trueStart = range.first + rangeOffset // Inclusive
-    val trueEnd = range.last + rangeOffset // Inclusive
+fun createUppaalError(path: UppaalPath, message: String, isUnrecoverable: Boolean = false): UppaalError
+    = createUppaalError(path, "", IntRange.EMPTY, message, isUnrecoverable)
 
-    var lineStart = -1
-    var columnStart = -1
+fun createUppaalError(path: UppaalPath, code: String, node: ParseTree, message: String, isUnrecoverable: Boolean = false): UppaalError
+    = createUppaalError(path, code, node.range(), message, isUnrecoverable)
 
-    var currentLine = 1
-    var currentColumn = 0
-    var currentIndex = -1
-
-    val chars = text.asSequence().iterator()
-    while (true)
-    {
-        val char = chars.next()
-        ++currentIndex
-        ++currentColumn
-
-        if (currentIndex == trueStart) {
-            lineStart = currentLine
-            columnStart = currentColumn
-        }
-
-        if (currentIndex == trueEnd)
-            return Quadruple(lineStart, columnStart, currentLine, currentColumn + 1) // Convert ot exclusive column end
-
-        if (char == '\n') {
-            ++currentLine
-            currentColumn = 0
-        }
-    }
-}
-
-
-fun getRangeFromLinesAndColumns(text: String, lineStart: Int, columnStart: Int, lineEnd: Int, columnEnd: Int): IntRange
-{
-    var startIndex = -1
-    var currentLine = 1
-    var currentColumn = 0
-    var currentIndex = -1
-
-    val chars = text.asSequence().iterator()
-    while (true)
-    {
-        val char = chars.next()
-        ++currentIndex
-        ++currentColumn
-
-        if (currentLine == lineStart && currentColumn == columnStart)
-            startIndex = currentIndex
-
-        if (currentLine == lineEnd && currentColumn == columnEnd - 1)
-            return IntRange(startIndex, currentIndex) // Convert to inclusive end
-
-        if (char == '\n') {
-            ++currentLine
-            currentColumn = 0
-        }
-    }
-}
-
-fun createUppaalError(path: List<PathNode>, message: String, isUnrecoverable: Boolean = false): UppaalError
-        = createUppaalError(path, "", IntRange.EMPTY, message, isUnrecoverable)
-
-fun createUppaalError(path: List<PathNode>, code: String, node: ParseTree, message: String, isUnrecoverable: Boolean = false): UppaalError
-        = createUppaalError(path, code, node.range(), message, isUnrecoverable)
-
-fun createUppaalError(path: List<PathNode>, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalError {
+fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalError {
     val linesAndColumns =
-        if (range != IntRange.EMPTY) getLinesAndColumnsFromRange(code, range)
-        else Quadruple(0,0,0,0)
-    return UppaalError(path,
-        linesAndColumns.first, linesAndColumns.second,
-        linesAndColumns.third, linesAndColumns.fourth,
-        message, "",
-        isUnrecoverable = isUnrecoverable
-    )
+        if (range != IntRange.EMPTY) LineColumnRange.fromIntRange(code, range)
+        else LineColumnRange(1,1,1,1)
+    return UppaalError(path, linesAndColumns, message, "", isUnrecoverable = isUnrecoverable)
 }

@@ -72,12 +72,12 @@ class SeCompMapper : Mapper {
 
 
         @Suppress("UNUSED_PARAMETER")
-        private fun mapGlobalDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
+        private fun mapGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
             registerTypedefsAndConstants(declaration.content)
             return listOf()
         }
 
-        private fun mapTemplate(path: List<PathNode>, template: Template): List<UppaalError> {
+        private fun mapTemplate(path: UppaalPath, template: Template): List<UppaalError> {
             val temName = template.name.content ?: return listOf(
                 createUppaalError(
                 path, "", IntRange(0,0), "Template has no name.", true
@@ -125,7 +125,7 @@ class SeCompMapper : Mapper {
             val subTemplateUsages = ArrayList<SubTemplateUsage>()
             for (locAndIndex in subTemplateLocations)
             {
-                val locPath = path.plus(PathNode(locAndIndex.value, locAndIndex.index))
+                val locPath = path.plus(locAndIndex)
                 val locName = locAndIndex.value.name!!.content!!
                 val nameAndInstance = locName
                     .trim().drop(SUB_TEMPLATE_USAGE_CLAMP.length).dropLast(SUB_TEMPLATE_USAGE_CLAMP.length)
@@ -135,28 +135,22 @@ class SeCompMapper : Mapper {
 
                 if (nameAndInstance.size != 2)
                 {
-                    errors.add(
-                        createUppaalError(
-                        locPath.plus(PathNode(locAndIndex.value.name!!)), locName, IntRange(0, locName.length-1), "To insert a sub-template, format the location's name as: \"::[sub-template name] [instantiated name]::\"."
-                    )
-                    )
+                    errors.add(createUppaalError(
+                        locPath.plus(locAndIndex.value.name!!), locName, IntRange(0, locName.length-1), "To insert a sub-template, format the location's name as: \"::[sub-template name] [instantiated name]::\"."
+                    ))
                     locAndIndex.value.name!!.content = "" // Prevent "invalid identifier" error from UPPAAL
                 }
                 else
                 {
                     val locId = locAndIndex.value.id
                     if (template.init?.ref == locId)
-                        errors.add(
-                            createUppaalError(
+                        errors.add(createUppaalError(
                             locPath, "", IntRange(0,0), "The initial/entry location cannot be a sub-template instance."
-                        )
-                        )
+                        ))
                     if (template.transitions.none { it.target.ref == locId } && subTemplates.containsKey(locName))
-                        errors.add(
-                            createUppaalError(
+                        errors.add(createUppaalError(
                             locPath, "", IntRange(0,0), "The exit location cannot be a sub-template instance."
-                        )
-                        )
+                        ))
 
                     if (errors.isEmpty()) {
                         subTemplateUsages.add(SubTemplateUsage(locId, nameAndInstance[0], nameAndInstance[1], locAndIndex.value.name!!.content!!))
@@ -178,7 +172,7 @@ class SeCompMapper : Mapper {
                 else if (parameters.isNullOrBlank())
                     numSubTemplateUsers[temName] = FreeInstantiation(null, listOf())
                 else {
-                    val parameterRanges = getParameterRanges(parameters, path.plus(PathNode(template.parameter!!)), parameters, parameters.indices, errors)
+                    val parameterRanges = getParameterRanges(parameters, path.plus(template.parameter!!), parameters, parameters.indices, errors)
                     numSubTemplateUsers[temName] = FreeInstantiation(null, parameterRanges)
                 }
             }
@@ -188,7 +182,7 @@ class SeCompMapper : Mapper {
             return errors
         }
 
-        private fun mapSystem(path: List<PathNode>, system: System): List<UppaalError> {
+        private fun mapSystem(path: UppaalPath, system: System): List<UppaalError> {
             registerTypedefsAndConstants(system.content)
 
             val errors = ArrayList<UppaalError>()
@@ -233,7 +227,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        private fun getParameterRanges(parameters: String?, parameterPath: List<PathNode>, fullText: String, trueRange: IntRange, errors: ArrayList<UppaalError>): ArrayList<Triple<Int, Int, String>?> {
+        private fun getParameterRanges(parameters: String?, parameterPath: UppaalPath, fullText: String, trueRange: IntRange, errors: ArrayList<UppaalError>): ArrayList<Triple<Int, Int, String>?> {
             val parameterRanges = ArrayList<Triple<Int, Int, String>?>()
             for (param in getParameters(parameters).withIndex()) {
                 val paramTree = freelyInstantiableParameterGrammar.matchExact(param.value) as? Node
@@ -343,7 +337,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        private fun mapTemplate(path: List<PathNode>, template: Template): List<UppaalError> {
+        private fun mapTemplate(path: UppaalPath, template: Template): List<UppaalError> {
             val errors = ArrayList<UppaalError>()
             val templateName = template.name.content ?: return listOf()
             val subTemUsages = baseSubTemplateUsers[templateName] ?: return listOf()
@@ -351,25 +345,21 @@ class SeCompMapper : Mapper {
             for (usage in subTemUsages)
                 if (usage.subTemplateName !in subTemplates.keys) {
                     val guiltyLocation = template.locations.withIndex().find { it.value.id == usage.insertLocationId }!!
-                    val locationPath = path.plus(PathNode(guiltyLocation.value, guiltyLocation.index+1))
-                    errors.add(
-                        createUppaalError(
+                    val locationPath = path.plus(guiltyLocation)
+                    errors.add(createUppaalError(
                         locationPath, usage.originalText, usage.originalText.indices, "The template name '${usage.subTemplateName}' either does not exist or is not a sub-template.", true
-                    )
-                    )
+                    ))
                 }
 
             return errors + checkCircularUse(path, listOf(templateName))
         }
 
-        private fun checkCircularUse(path: List<PathNode>, branch: List<String>): List<UppaalError> {
+        private fun checkCircularUse(path: UppaalPath, branch: List<String>): List<UppaalError> {
             if (branch.size != branch.distinct().size)
                 return if (branch.last() == branch.first()) // If cycle pertains to root template
-                    listOf(
-                        createUppaalError(
+                    listOf(createUppaalError(
                         path, "Cyclic sub-template usage: ${branch.joinToString(" -> ") { "'${it}'" }}.", true
-                    )
-                    )
+                    ))
                 else
                     listOf() // If cycle does not pertain to root template, wait for that template's check to come
 
@@ -402,7 +392,7 @@ class SeCompMapper : Mapper {
 
 
         @Suppress("UNUSED_PARAMETER")
-        private fun mapGlobalDeclaration(path: List<PathNode>, declaration: Declaration): List<UppaalError> {
+        private fun mapGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
             findTotalNumbersOfInstances()
 
             val nextSubTemIndex = HashMap<String, Int>()
@@ -495,7 +485,7 @@ class SeCompMapper : Mapper {
 
 
         @Suppress("UNUSED_PARAMETER")
-        private fun mapTemplate(path: List<PathNode>, template: Template): List<UppaalError> {
+        private fun mapTemplate(path: UppaalPath, template: Template): List<UppaalError> {
             val subTemplateInfo = subTemplates[template.name.content!!]
             if (subTemplateInfo != null && !subTemplateInfo.isFaulty)
                 mapSubTemplate(template, subTemplateInfo)
@@ -578,7 +568,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        private fun mapSystem(path: List<PathNode>, system: System): List<UppaalError> {
+        private fun mapSystem(path: UppaalPath, system: System): List<UppaalError> {
             var newSystem = system.content
             val systemLineNode = ConfreHelper.systemLineConfre.find(system.content) as? Node
                 ?: return listOf(createUppaalError(path, system.content, IntRange(system.content.length, system.content.length), "Missing 'system' line at end of system declarations.", true))
