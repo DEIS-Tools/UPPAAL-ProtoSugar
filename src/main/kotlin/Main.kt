@@ -177,7 +177,8 @@ private fun runServer(server: String)
                     latestModelErrors = null
                     val modelResult = interceptModelCmd(toEngineInput)
                     if (modelResult.second.any { it.isUnrecoverable }) {
-                        toGuiOutput.write(generateModelErrorResponse(modelResult.second))
+                        val mappedErrors = engine.mapModelErrors(listOf(), modelResult.second)
+                        toGuiOutput.write(generateModelErrorResponse(mappedErrors))
                         toGuiOutput.flush()
                     }
                     else {
@@ -269,7 +270,8 @@ private fun runServer(server: String)
                     }
                     else {
                         interceptModelSuccessResponse(toGuiInput, true) // Yes. Ignore output
-                        toGuiOutput.write(generateModelErrorResponse(latestModelErrors))
+                        val mappedErrors = engine.mapModelErrors(listOf(), latestModelErrors)
+                        toGuiOutput.write(generateModelErrorResponse(mappedErrors))
                     }
                     toGuiOutput.flush()
                 }
@@ -406,10 +408,6 @@ private fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
 private fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
 
-fun String.jsonFy() = this.replace("\\", "\\\\").replace("\"", "\\\"")
-fun String.unJsonFy() = this.replace("\\\"", "\"").replace("\\\\", "\\")
-fun IntRange.offset(offset: Int) = (this.first + offset .. this.last + offset)
-fun IntRange.length() = this.last - this.first + 1
 
 private fun writeException(ex: Exception)
     = File(crashDetailsFilePath).printWriter().use { out -> out.println("$ex\n${ex.stackTraceToString()}") }

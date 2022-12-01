@@ -93,7 +93,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
     fun mapModelErrors(engineErrors: List<UppaalError>, mapperErrors: List<UppaalError>): List<UppaalError> {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
-        return reversePhases.fold(mapperErrors.plus(engineErrors)) { errors, mapper -> mapper.mapModelErrors(errors) }
+        return reversePhases.fold(mapperErrors + engineErrors) { errors, mapper -> mapper.mapModelErrors(errors) }
     }
     fun mapProcesses(processes: List<ProcessInfo>) {
         // Mapped in reverse order since the error is based on the last modelPhase's result

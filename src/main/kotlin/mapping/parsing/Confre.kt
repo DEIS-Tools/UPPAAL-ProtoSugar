@@ -238,7 +238,9 @@ class Confre(grammar: String) {
                     if (tree != null)
                         return tree
                 }
-                else tokens.next()
+                else if (tokens.current().terminal != eof)
+                    tokens.next()
+
                 if (tokens.current().terminal == eof)
                     return null
             }
@@ -544,6 +546,9 @@ class Node(override val grammar: Grammar, val children: List<ParseTree?>) : Pars
     override fun isNotBlank() =  children.any { it?.isNotBlank() ?: false }
     override fun startPosition(): Int = children.first { it?.isNotBlank() ?: false }!!.startPosition()
     override fun endPosition(): Int = children.last { it?.isNotBlank() ?: false }!!.endPosition()
+
+    /** Get the inclusive start and end indices based on child indices in an IntRange object **/
+    fun range(firstChild: Int, lastChild: Int): IntRange = IntRange(children[firstChild]!!.startPosition(), children[lastChild]!!.endPosition())
 
     override fun preOrderWalk(): Sequence<ParseTree> = sequence{
         yield(this@Node)

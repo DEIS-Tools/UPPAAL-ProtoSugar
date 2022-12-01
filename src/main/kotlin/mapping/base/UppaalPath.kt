@@ -10,7 +10,7 @@ class UppaalPath private constructor(path: List<PathNode>): ArrayList<PathNode>(
     fun plus(element: UppaalPojo, index: Int? = null) = UppaalPath(plus(PathNode(element, index)))
     fun plus(element: IndexedValue<UppaalPojo>) = UppaalPath(plus(PathNode(element.value, element.index + 1))) // +1 since UPPAAL paths are 1-indexed
 
-    override fun toString() = joinToString("/")
+    override fun toString() = '/' + joinToString("/")
 }
 
 data class PathNode(val element: UppaalPojo, @Suppress("MemberVisibilityCanBePrivate") val index: Int? = null) {

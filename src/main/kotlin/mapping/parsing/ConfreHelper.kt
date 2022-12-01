@@ -49,7 +49,7 @@ class ConfreHelper {
         val systemLineConfre = Confre("""
             IDENT = [_a-zA-Z][_a-zA-Z0-9]*
             
-            Param :== 'system' IDENT {',' IDENT} .
+            System :== 'system' IDENT {',' IDENT} .
         """.trimIndent())
     }
 }
