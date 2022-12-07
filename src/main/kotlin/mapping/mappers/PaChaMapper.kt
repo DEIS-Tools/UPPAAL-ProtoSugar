@@ -1,5 +1,6 @@
 package mapping.mappers
 
+import createOrGetRewriter
 import joinInsert
 import mapping.base.*
 import mapping.parsing.*
@@ -93,16 +94,16 @@ class PaChaMapper : Mapper {
         }
 
         private fun mapSystem(path: UppaalPath, system: System): List<UppaalError> {
-            val (newContentPartial, errorsFirst) = mapPaChaDeclarations(path, system.content, paChaMaps[null]!!)
-            val (newContentFull, errorsSecond) = mapTemplateInstantiations(path, newContentPartial)
-            system.content = newContentFull
-            return errorsFirst.plus(errorsSecond)
+            val rewriter = rewriters.createOrGetRewriter(path, system.content)
+            val errorsFirst = mapPaChaDeclarations(path, rewriter, paChaMaps[null]!!)
+            val (newContent, errorsSecond) = mapTemplateInstantiations(path, rewriter)
+            system.content = newContent
+            return errorsFirst + errorsSecond
         }
 
 
         private fun mapPaChaDeclarations(path: UppaalPath, code: String, scope: PaChaMap, mapInPartialInstantiationIndex: Int = -1): Pair<String, List<UppaalError>> {
-            val rewriter = Rewriter(code)
-            rewriters[path.toString()] = rewriter
+            val rewriter = rewriters.createOrGetRewriter(path, code)
             val errors = mapPaChaDeclarations(path, rewriter, scope, mapInPartialInstantiationIndex)
             return Pair(rewriter.getRewrittenText(), errors)
         }
@@ -225,10 +226,8 @@ class PaChaMapper : Mapper {
 
         private fun mapEmitOrReceive(syncPath: UppaalPath, updatePath: UppaalPath, match: Node, sync: Label, update: Label, scope: PaChaMap): List<UppaalError>
         {
-            val syncRewriter = Rewriter(sync.content)
-            val updateRewriter = Rewriter(update.content)
-            rewriters[syncPath.toString()] = syncRewriter
-            rewriters[updatePath.toString()] = updateRewriter
+            val syncRewriter = rewriters.createOrGetRewriter(syncPath, sync.content)
+            val updateRewriter = rewriters.createOrGetRewriter(updatePath, update.content)
 
             val channelName = match.children[0]!!.toString()
             val chanInfo = scope[channelName] ?: paChaMaps[null]!![channelName]
@@ -376,14 +375,12 @@ class PaChaMapper : Mapper {
         }
 
 
-        private fun mapTemplateInstantiations(path: UppaalPath, system: String): Pair<String, List<UppaalError>>
+        private fun mapTemplateInstantiations(path: UppaalPath, rewriter: Rewriter): Pair<String, List<UppaalError>>
         {
             val globalPaChas = paChaMaps[null]!!
-            val rewriter = Rewriter(system)
-            rewriters[path.toString()] = rewriter
 
             val errors = ArrayList<UppaalError>()
-            for ((partialInstIndex, partialInstTree) in ConfreHelper.partialInstantiationConfre.findAll(system).map { it as Node }.withIndex())
+            for ((partialInstIndex, partialInstTree) in ConfreHelper.partialInstantiationConfre.findAll(rewriter.originalText).map { it as Node }.withIndex())
             {
                 // Compute PaChaMap for lhs of partial instantiation
                 val lhsName = partialInstTree.children[0]!!.toString()
@@ -411,7 +408,7 @@ class PaChaMapper : Mapper {
                     val argChannelName = fullArgument.toString().split(' ', limit = 3)[1]
                     val argPaChaInfo = globalPaChas[argChannelName] ?: lhsPaChas[argChannelName]
                     if (argPaChaInfo == null) {
-                        errors += createUppaalError(path, system, fullArgument, "'$argChannelName' is not a parameterized channel(-array).", true)
+                        errors += createUppaalError(path, rewriter.originalText, fullArgument, "'$argChannelName' is not a parameterized channel(-array).", true)
                         continue
                     }
 
@@ -420,9 +417,9 @@ class PaChaMapper : Mapper {
 
                     val newErrors = ArrayList<UppaalError>()
                     if (argPaChaInfo.numParameters != paramPaChaInfo.numParameters)
-                        newErrors += createUppaalError(path, system, fullArgument, "Argument with '$argChannelName' has '${argPaChaInfo.numParameters}' parameter(s), but the formal parameter requires '${paramPaChaInfo.numParameters}' parameter(s).", true)
+                        newErrors += createUppaalError(path, rewriter.originalText, fullArgument, "Argument with '$argChannelName' has '${argPaChaInfo.numParameters}' parameter(s), but the formal parameter requires '${paramPaChaInfo.numParameters}' parameter(s).", true)
                     if (argInputNumDimensions != paramPaChaInfo.numDimensions)
-                        newErrors += createUppaalError(path, system, fullArgument, "Argument with '$argChannelName' results in '${argInputNumDimensions}' dimensions(s), but the formal parameter requires '${paramPaChaInfo.numDimensions}' dimensions(s).", true)
+                        newErrors += createUppaalError(path, rewriter.originalText, fullArgument, "Argument with '$argChannelName' results in '${argInputNumDimensions}' dimensions(s), but the formal parameter requires '${paramPaChaInfo.numDimensions}' dimensions(s).", true)
                     if (errors.addAll(newErrors))
                         continue
 

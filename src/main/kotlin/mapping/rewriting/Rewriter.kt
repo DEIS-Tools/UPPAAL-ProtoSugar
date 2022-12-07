@@ -18,7 +18,7 @@ class Rewriter(val originalText: String) {
     private var hasChanges = false
     private var rewrittenText = StringBuilder(originalText)
     private val simpleBackMaps = ArrayList<SimpleBackMap>()
-    private var appendStartsAt = 0
+    private var appendStartsAt = Int.MAX_VALUE
     private val advancedBackMaps = ArrayList<AdvancedBackMap>()
 
     private val insertOps = ArrayList<InsertOp>()

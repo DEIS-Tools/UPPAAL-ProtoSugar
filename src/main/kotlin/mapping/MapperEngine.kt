@@ -14,7 +14,7 @@ import java.lang.Exception
 class MapperEngine(private val mappers: List<Mapper>) {
     private val serializer: Serializer = Persister()
 
-    private var modelPhases: List<ModelPhase>? = null
+    private var modelPhases: ArrayList<ModelPhase>? = null
     private var simulatorPhases: List<SimulatorPhase>? = null
     private var queryPhases: List<QueryPhase>? = null
 
@@ -38,24 +38,23 @@ class MapperEngine(private val mappers: List<Mapper>) {
     }
     private fun runModelMappers(nta: Nta): List<UppaalError> {
         val errors = ArrayList<UppaalError>()
-        val newModelPhases = ArrayList<ModelPhase>()
         val newSimulatorPhases = ArrayList<SimulatorPhase>()
         val newQueryPhases = ArrayList<QueryPhase>()
 
+        modelPhases = ArrayList()
         for (mapper in mappers.map { it.getPhases() }) {
             for (phase in mapper.modelPhases) {
-                phase.phaseIndex = newModelPhases.size
+                phase.phaseIndex = modelPhases!!.size
                 errors.addAll(visitNta(nta, UppaalPath(nta), phase).onEach { it.phaseIndex = phase.phaseIndex })
                 if (errors.any { it.isUnrecoverable })
                     return errors
-                newModelPhases.add(phase)
+                modelPhases!!.add(phase)
             }
 
             mapper.simulatorPhase?.let { newSimulatorPhases.add(it) }
             mapper.queryPhase?.let { newQueryPhases.add(it) }
         }
 
-        modelPhases = newModelPhases
         if (errors.size == 0) {
             simulatorPhases = newSimulatorPhases
             queryPhases = newQueryPhases

@@ -1,5 +1,6 @@
 package mapping.mappers
 
+import createOrGetRewriter
 import mapping.base.*
 import mapping.parsing.*
 import mapping.rewriting.ActivationRule
@@ -42,8 +43,7 @@ class AutoArrMapper : Mapper {
         }
 
         private fun mapAutoArrayInstantiations(code: String, path: UppaalPath): Pair<String, List<UppaalError>> {
-            val rewriter = Rewriter(code)
-            rewriters[path.toString()] = rewriter
+            val rewriter = rewriters.createOrGetRewriter(path, code)
 
             val errors = ArrayList<UppaalError>()
             for (autoArr in arrayConfre.findAll(code).map { it as Node }) {

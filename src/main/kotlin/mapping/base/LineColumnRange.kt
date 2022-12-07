@@ -1,5 +1,7 @@
 package mapping.base
 
+import java.lang.Exception
+
 /** A "UPPAAL style" start/end line/column values for some text. **/
 data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine: Int, var endColumn: Int) {
     override fun toString(): String = "($beginLine, $beginColumn, $endLine, $endColumn)"
@@ -11,7 +13,7 @@ data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine
         var currentIndex = -1
 
         val chars = text.asSequence().iterator()
-        while (true) {
+        while (chars.hasNext()) {
             val char = chars.next()
             ++currentIndex
             ++currentColumn
@@ -19,14 +21,16 @@ data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine
             if (currentLine == beginLine && currentColumn == beginColumn)
                 startIndex = currentIndex
 
-            if (currentLine == endLine && currentColumn == endColumn - 1)
-                return IntRange(startIndex, currentIndex) // Convert to inclusive end
+            if (currentLine >= endLine && currentColumn == endColumn - 1)
+                return IntRange(startIndex, currentIndex) // -1 to convert to inclusive end
 
             if (char == '\n') {
                 ++currentLine
                 currentColumn = 0
             }
         }
+
+        throw Exception("Could not convert $this to IntRange on text:\n$text")
     }
 
     companion object {
