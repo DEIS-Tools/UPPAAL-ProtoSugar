@@ -1,27 +1,25 @@
 package mapping.mappers
 
+import joinInsert
 import mapping.base.*
 import mapping.parsing.*
-import offset
+import mapping.rewriting.ActivationRule
+import mapping.rewriting.BackMapResult
+import mapping.rewriting.Rewriter
 import uppaal_pojo.*
 import uppaal_pojo.Declaration
-import java.lang.Character.MIN_VALUE as nullChar
 
 
 data class PaChaInfo(val numParameters: Int, val numDimensions: Int, val parameterIndex: Int?)
 class PaChaMap : HashMap<String, PaChaInfo>()
 
 class PaChaMapper : Mapper {
-    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
-        = Triple(sequenceOf(Phase1()), null, null)
+    override fun getPhases(): PhaseOutput
+        = PhaseOutput(sequenceOf(Phase1()), null, null)
 
     private class Phase1 : ModelPhase()
     {
-        private val PARAMETER_TYPE_HINT = "PARAM_TYPE"
-
-        private val backMaps = HashMap<LineColumnRange, Pair<LineColumnRange, String>>()
-        private val paChaMaps: HashMap<String?, PaChaMap> = hashMapOf(Pair(null, PaChaMap()))
-
+        private val paChaMaps: HashMap<String?, PaChaMap> = hashMapOf(Pair(null, PaChaMap())) // 'null' = global scope
 
         // TODO: Fix so that normal channel parameters of Templates are tracked for type-error-handing in partial instantiations
         private val chanDeclGrammar = Confre("""
@@ -37,6 +35,8 @@ class PaChaMapper : Mapper {
             
             ${ConfreHelper.expressionGrammar}
         """.trimIndent())
+
+        private val rewriters = HashMap<String, Rewriter>()
 
 
         init {
@@ -59,7 +59,7 @@ class PaChaMapper : Mapper {
 
         private fun mapDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
             val parent = path.takeLast(2).first().element
-            val paChaMap = paChaMaps[(parent as? Template)?.name?.content]!!
+            val paChaMap = paChaMaps[(parent as? Template)?.name?.content]!! // 'null' = global scope
 
             val (newContent, errors) = mapPaChaDeclarations(path, declaration.content, paChaMap)
             declaration.content = newContent
@@ -101,43 +101,43 @@ class PaChaMapper : Mapper {
 
 
         private fun mapPaChaDeclarations(path: UppaalPath, code: String, scope: PaChaMap, mapInPartialInstantiationIndex: Int = -1): Pair<String, List<UppaalError>> {
-            val inParameterList = mapInPartialInstantiationIndex != -1 || (path.last().element is Parameter) // In "system/declaration" or in "parameter"
-            val errors = ArrayList<UppaalError>()
-            var offset = 0
-            var newCode = code
-            val partialInstantiations = ConfreHelper.partialInstantiationConfre.findAll(code).map { it as Node }.toList()
+            val rewriter = Rewriter(code)
+            rewriters[path.toString()] = rewriter
+            val errors = mapPaChaDeclarations(path, rewriter, scope, mapInPartialInstantiationIndex)
+            return Pair(rewriter.getRewrittenText(), errors)
+        }
 
-            for (chan in chanDeclGrammar.findAll(code).map { it as Node }.filter { isPaChaDecl(path, code, it, errors) }) {
-                val currentPartialInstantiationIndex =
-                    partialInstantiations.indexOfFirst { it.startPosition() <= chan.startPosition() && chan.startPosition() <= it.endPosition() }
+        private fun mapPaChaDeclarations(path: UppaalPath, rewriter: Rewriter, scope: PaChaMap, mapInPartialInstantiationIndex: Int = -1): List<UppaalError> {
+            val originalCode = rewriter.originalText
+
+            val inParameterList = mapInPartialInstantiationIndex != -1 || (path.last().element is Parameter) // In "system/declaration" or in "parameter" (or partial instantiation)
+            val partialInstantiations = ConfreHelper.partialInstantiationConfre.findAll(originalCode).map { it as Node }.toList()
+
+            val errors = ArrayList<UppaalError>()
+            for (chan in chanDeclGrammar.findAll(originalCode).map { it as Node }.filter { isPaChaDecl(path, originalCode, it, errors) }) {
+                val currentPartialInstantiationIndex = partialInstantiations.indexOfFirst { chan.startPosition() in it.range() }
                 if (mapInPartialInstantiationIndex != currentPartialInstantiationIndex)
                     continue
 
-                val forgotSemicolon = !inParameterList && checkSemicolon(path, code, chan, errors)
+                val forgotSemicolon = !inParameterList && checkSemicolon(path, originalCode, chan, errors)
                 val chanName = chan.children[3]!!.toString()
 
                 // Test parameter reference
                 if (inParameterList && chan.children[2]!!.isBlank())
-                    errors.add(createUppaalError(path, code, chan.children[3]!!.range(), "A channel parameter of a template must be a reference.", false))
+                    errors.add(createUppaalError(path, originalCode, chan.children[3]!!.range(), "A channel parameter (of a template or partial instantiation) must be a reference.", false))
 
                 // Parse and remove type list
                 val typeListNode = chan.children[1] as Node
-                val typeNodes = listOf(typeListNode.children[1] as Node)
-                    .plus((typeListNode.children[2] as Node).children.map { (it as Node).children[1] as Node })
-                val typeErrors = checkTypes(path, code, typeNodes, typeListNode.range())
+                val typeNodes = listOf(typeListNode.children[1]!!.asNode()) + (typeListNode.children[2]!!.asNode()).children.map { it!!.asNode().children[1]!!.asNode() }
+                val typeErrors = checkTypes(path, originalCode, typeNodes, typeListNode.range())
                 errors.addAll(typeErrors)
-
-                val typesStart = typeListNode.startPosition() + offset
-                val typesEnd = typeListNode.endPosition() + 1 + offset
-                newCode = newCode.replaceRange(typesStart, typesEnd, " ".repeat(typesEnd - typesStart))
+                rewriter.replace(typeListNode.range(), "")
 
                 // Generate parameter meta-variables
                 if (typeErrors.isEmpty()) {
-                    var insertPosition = chan.endPosition() + 1 + offset
-                    if (forgotSemicolon) {
-                        newCode = newCode.replaceRange(insertPosition, insertPosition, ";")
-                        ++insertPosition
-                    }
+                    val justAfterChan = chan.endPosition() + 1
+                    if (forgotSemicolon)
+                        rewriter.insert(justAfterChan, ";")
 
                     for (pair in typeNodes.map { it.children[0] as Node }.withIndex()) {
                         val typeName = pair.value.children[1]!!.toString()
@@ -148,48 +148,42 @@ class PaChaMapper : Mapper {
                             if (inParameterList)
                                 ", $typeName &__${chanName}_p${pair.index+1}${array}"
                             else
-                                " meta $typeName __${chanName}_p${pair.index+1}${array};"
-                        newCode = newCode.replaceRange(insertPosition, insertPosition, parameterVariableDecl)
+                                "\nmeta $typeName __${chanName}_p${pair.index+1}${array};"
 
-                        // To map "unknown type" errors back to new syntax
-                        val baseRange = IntRange(insertPosition, insertPosition + typeName.length-1)
-                        val newLinesAndColumns =
-                            if (inParameterList) LineColumnRange.fromIntRange(newCode, baseRange.offset(2))
-                            else LineColumnRange.fromIntRange(newCode, baseRange.offset(6))
-                        backMaps[newLinesAndColumns] = Pair(LineColumnRange.fromIntRange(code, pair.value.range()), PARAMETER_TYPE_HINT)
-
-                        // Update
-                        offset += parameterVariableDecl.length
-                        insertPosition += parameterVariableDecl.length
+                        rewriter.insert(justAfterChan, parameterVariableDecl)
+                            .addBackMap()
+                            .activateOn(parameterVariableDecl.indices, ActivationRule.ACTIVATION_CONTAINS_ERROR)
+                            .overrideErrorRange { pair.value.range() }
                     }
                 }
 
-                var guiltyRange = IntRange(0, code.length-1)
-                val numTypes = if (typeErrors.isEmpty()) typeNodes.size else -1 // "-1" means "mapper ignore for now"
-                val numDimensions = (chan.children[4] as Node).children.size
+                // Store information about the current channel variable (or parameter)
+                var parameterListRange = IntRange(0, originalCode.length-1)
                 val parameterIndex =
                     if (inParameterList && mapInPartialInstantiationIndex == -1)
-                        getParameterIndex(code.withIndex().iterator(), chan.startPosition())
+                        ParseHelper.getParameterIndex(originalCode.withIndex().iterator(), chan.startPosition())
                     else if (inParameterList) {
                         // Takes the parameter list without surrounding parentheses
-                        guiltyRange = partialInstantiations[mapInPartialInstantiationIndex]
-                            .children[1]!!.asNode().children[1]!!.range()
-                        val parameterString = code.substring(guiltyRange)
-                        getParameterIndex(parameterString.withIndex().iterator(), chan.startPosition() - guiltyRange.first)
+                        parameterListRange = partialInstantiations[mapInPartialInstantiationIndex].children[1]!!.asNode().children[1]!!.range()
+                        val parameterString = originalCode.substring(parameterListRange)
+                        ParseHelper.getParameterIndex(parameterString.withIndex().iterator(), chan.startPosition() - parameterListRange.first)
                     }
                     else null
+                val numTypes =
+                    if (typeErrors.isEmpty()) typeNodes.size
+                    else -1 // "-1" means "mapper should not map this because of errors"
+                val numDimensions = (chan.children[4] as Node).children.size
                 scope[chanName] = PaChaInfo(numTypes, numDimensions, parameterIndex)
 
                 if (inParameterList && parameterIndex == null)
-                    errors.add(
-                        createUppaalError(
-                        path, code, guiltyRange, "Syntax error in parameters wrt. blocks: '()', '[]', and '{}'", true
-                    )
-                    )
+                    errors.add(createUppaalError(
+                        path, originalCode, parameterListRange, "Syntax error in parameters wrt. blocks: '()', '[]', and '{}'", true
+                    ))
             }
 
-            return Pair(newCode, errors)
+            return errors
         }
+
 
         private fun isPaChaDecl(path: UppaalPath, code: String, decl: Node, errors: ArrayList<UppaalError>): Boolean {
             val nameNode = decl.children[0]!!
@@ -219,7 +213,7 @@ class PaChaMapper : Mapper {
                     if (type.children[0]?.isNotBlank() == true)
                         errors.add(createUppaalError(path, originalCode, type.children[0]!!, "A parameterized channel cannot have reference parameters."))
 
-                    // Check if parameter-type is itself a channel (which is illegal without the "channel reference" mapper)
+                    // Check if parameter-type is itself a channel (which is illegal for now)
                     if (type.children[1]!!.toString() == "chan")
                         errors.add(createUppaalError(path, originalCode, type, "Parameterized channels do not support channel-type parameters."))
                     else if (type.children[2]?.isNotBlank() == true)
@@ -228,102 +222,82 @@ class PaChaMapper : Mapper {
             return errors
         }
 
-        private fun getParameterIndex(parameterStringChars: Iterator<IndexedValue<Char>>, currParamStartIndex: Int, endChar: Char = nullChar): Int? {
-            val endChars = listOf(')', ']', '}')
-            var localParamIndex = 0
-            do {
-                val next = parameterStringChars.next()
-                if (next.value in endChars && next.value != endChar)
-                    return null // Formatting error
-
-                when (next.value) {
-                    ',' -> localParamIndex++
-                    '(' -> getParameterIndex(parameterStringChars, currParamStartIndex, ')') ?: return null
-                    '[' -> getParameterIndex(parameterStringChars, currParamStartIndex, ']') ?: return null
-                    '{' -> getParameterIndex(parameterStringChars, currParamStartIndex, '}') ?: return null
-                    endChar -> return -1
-                }
-            } while (parameterStringChars.hasNext() && (next.index != currParamStartIndex || endChar != nullChar))
-
-            if (!parameterStringChars.hasNext())
-                return null // Formatting error
-
-            return localParamIndex
-        }
-
 
         private fun mapEmitOrReceive(syncPath: UppaalPath, updatePath: UppaalPath, match: Node, sync: Label, update: Label, scope: PaChaMap): List<UppaalError>
         {
-            val errors = ArrayList<UppaalError>()
+            val syncRewriter = Rewriter(sync.content)
+            val updateRewriter = Rewriter(update.content)
+            rewriters[syncPath.toString()] = syncRewriter
+            rewriters[updatePath.toString()] = updateRewriter
+
             val channelName = match.children[0]!!.toString()
             val chanInfo = scope[channelName] ?: paChaMaps[null]!![channelName]
             if (chanInfo == null && match.children[2]!!.isBlank())
                 return listOf()
 
-            val originalSync = sync.content
-            if (match.children[2]!!.isNotBlank())
-                sync.content = sync.content.replaceRange(match.children[2]!!.range(), "")
+            if (match.children[2]!!.isNotBlank()) {
+                syncRewriter.replace(match.children[2]!!.range(), "")
+                sync.content = syncRewriter.getRewrittenText()
+            }
 
             val argOrParamNodes = getArgOrParamNodes(match.children[2] as Node)
             val expectedLength = chanInfo?.numParameters ?: 0
             if (argOrParamNodes.size != expectedLength)
-                return errors.plus(
-                    createUppaalError(
-                    syncPath, originalSync, match.children[0]!!.range(), "'$channelName' expects '$expectedLength' arguments/parameters. Got '${argOrParamNodes.size}'.")
-                )
-            if (errors.size > 0 || expectedLength == 0)
-                return errors
+                return listOf(createUppaalError(syncPath, syncRewriter.originalText, match.children[0]!!.range(), "Channel '$channelName' expects '$expectedLength' argument(s)/parameter(s). Got '${argOrParamNodes.size}'."))
+            if (expectedLength == 0)
+                return listOf()
 
+            val errors = ArrayList<UppaalError>()
             val isEmit = match.children[3]!!.toString() == "!"
-            if (isEmit)
-            {
-                val arguments = extractChanArgs(syncPath, errors, argOrParamNodes, originalSync, match.children[0]!!)
+            if (isEmit) {
+                val arguments = extractChanArgs(syncPath, errors, argOrParamNodes, syncRewriter.originalText, match.children[0]!!)
                 if (arguments.any { it == null })
                     return errors
 
-                val originalUpdate = update.content
-                update.content = arguments.withIndex().joinToString(
-                    separator = ", ",
-                    transform = { (index, expr) -> "__${channelName}_p${index+1} = ${expr!!}" }
-                )
-                if (originalUpdate.isNotBlank())
-                    update.content += ",\n$originalUpdate"
+                // Insert updates of the global parameter-variables
+                val insertList = arguments.withIndex().map { "__${channelName}_p${it.index+1} = ${it.value!!.first}" }
+                updateRewriter.joinInsert(0, insertList).forEach { insertOp ->
+                    insertOp.value.addBackMap()
+                        .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
+                        .overrideErrorPath { Pair(syncPath.toString(), syncRewriter) }
+                        .overrideErrorRange { arguments[insertOp.index]!!.second }
+                }
+                if (updateRewriter.originalText.isNotBlank())
+                    updateRewriter.insert(0, ",\n")
             }
-            else
-            {
-                val parameters = extractChanParams(syncPath, errors, argOrParamNodes, originalSync, match.children[0]!!)
+            else { // Otherwise, it's a "Listen"
+                val parameters = extractChanParams(syncPath, errors, argOrParamNodes, syncRewriter.originalText, match.children[0]!!)
                 if (parameters.any { it == null })
                     return errors
 
-                val originalUpdate = update.content
                 val (metaParams, nonMetaParams) = parameters.filterNotNull().withIndex().partition { it.value.first }
 
-                update.content = nonMetaParams.joinToString(
-                    separator = ", ",
-                    transform = { (index, param) -> "${param.second} = __${channelName}_p${index+1}" }
-                )
+                // Update local non-meta variables
+                val insertList = nonMetaParams.map { "${it.value.second} = __${channelName}_p${it.index+1}" }
+                updateRewriter.joinInsert(0, insertList).forEach { insertOp ->
+                    insertOp.value.addBackMap()
+                        .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
+                        .overrideErrorPath { Pair(syncPath.toString(), syncRewriter) }
+                        .overrideErrorRange { nonMetaParams[insertOp.index].value.third }
+                }
 
-                if (originalUpdate.isNotBlank())
-                {
-                    var metaMappedUpdate = originalUpdate
-                    val updateTree = ConfreHelper.expressionAssignmentListConfre.matchExact(metaMappedUpdate)
-                        ?: return errors.plus(createUppaalError(updatePath, originalUpdate, (0..originalUpdate.length+1), "PaCha mapper could not parse this update label", true))
+                // Replace meta-variables with global parameter-variables.
+                if (updateRewriter.originalText.isNotBlank()) {
+                    updateRewriter.insert(0, ",\n")
+                    val updateTree = ConfreHelper.expressionAssignmentListConfre.matchExact(updateRewriter.originalText)
+                        ?: return errors + createUppaalError(
+                            updatePath, updateRewriter.originalText, updateRewriter.originalText.indices, "PaCha mapper could not parse this update label", true
+                        )
 
-                    var offset = 0
-                    for (leaf in updateTree.preOrderWalk().mapNotNull { it as? Leaf }.filter { it.isNotBlank() })
-                    {
-                        val param = metaParams.find { it.value.second == leaf.token!!.value } ?: continue
-                        val range = (leaf.startPosition()+offset..leaf.endPosition()+offset)
-                        val replacement = "__${channelName}_p${param.index+1}"
-
-                        metaMappedUpdate = metaMappedUpdate.replaceRange(range, replacement)
-                        offset += replacement.length - leaf.length()
+                    for (leaf in updateTree.preOrderWalk().mapNotNull { it as? Leaf }.filter { it.isNotBlank() }) {
+                        val param = metaParams.find { it.value.second == leaf.token!!.value }
+                            ?: continue
+                        updateRewriter.replace(leaf.range(), "__${channelName}_p${param.index+1}")
                     }
-
-                    update.content = listOf(update.content, metaMappedUpdate).filter { it.isNotBlank() }.joinToString(",\n")
                 }
             }
 
+            update.content = updateRewriter.getRewrittenText()
             return errors
         }
 
@@ -343,32 +317,32 @@ class PaChaMapper : Mapper {
             return args
         }
 
-        private fun extractChanArgs(syncPath: UppaalPath, errors: ArrayList<UppaalError>, argList: List<Node>, originalSync: String, nameNode: ParseTree): List<String?>
+        private fun extractChanArgs(syncPath: UppaalPath, errors: ArrayList<UppaalError>, argList: List<Node>, originalSync: String, nameNode: ParseTree): List<Pair<String, IntRange>?>
         {
-            var blankArgument = false
-            val args = ArrayList<String?>()
+            var foundBlankArgument = false
+            val args = ArrayList<Pair<String, IntRange>?>()
             for (arg in argList)
                 if (arg.children[0]!!.isNotBlank()) {
                     errors.add(createUppaalError(syncPath, originalSync, arg.children[0]!!, "Cannot use 'meta' when emitting on a channel. Only expressions are allowed when emitting.", true))
                     args.add(null)
                 }
                 else if (arg.children[1]!!.isNotBlank())
-                    args.add(originalSync.substring(arg.children[1]!!.range()))
+                    args.add(Pair(originalSync.substring(arg.children[1]!!.range()), arg.children[1]!!.range()))
                 else
                 {
-                    if (!blankArgument)
+                    if (!foundBlankArgument)
                         errors.add(createUppaalError(syncPath, originalSync, nameNode, "One or more blank arguments.", true))
-                    blankArgument = true
+                    foundBlankArgument = true
                     args.add(null)
                 }
 
             return args
         }
 
-        private fun extractChanParams(syncPath: UppaalPath, errors: ArrayList<UppaalError>, paramList: List<Node>, originalSync: String, nameNode: ParseTree): List<Pair<Boolean, String>?>
+        private fun extractChanParams(syncPath: UppaalPath, errors: ArrayList<UppaalError>, paramList: List<Node>, originalSync: String, nameNode: ParseTree): List<Triple<Boolean, String, IntRange>?>
         {
             var blankParameter = false
-            val params = ArrayList<Pair<Boolean, String>?>()
+            val params = ArrayList<Triple<Boolean, String, IntRange>?>()
             for (param in paramList)
                 if (param.children[1]!!.isNotBlank())
                 {
@@ -388,7 +362,7 @@ class PaChaMapper : Mapper {
                     }
 
                     val isMeta = param.children[0]!!.isNotBlank()
-                    params.add(Pair(isMeta, paramName))
+                    params.add(Triple(isMeta, paramName, param.range()))
                 }
                 else
                 {
@@ -405,94 +379,77 @@ class PaChaMapper : Mapper {
         private fun mapTemplateInstantiations(path: UppaalPath, system: String): Pair<String, List<UppaalError>>
         {
             val globalPaChas = paChaMaps[null]!!
+            val rewriter = Rewriter(system)
+            rewriters[path.toString()] = rewriter
+
             val errors = ArrayList<UppaalError>()
-
-            var newSystem = system
-            var offset = 0
-            var currentPartialInstantiationIndex = -1
-            for (instanceTree in ConfreHelper.partialInstantiationConfre.findAll(system).map { it as Node })
+            for ((partialInstIndex, partialInstTree) in ConfreHelper.partialInstantiationConfre.findAll(system).map { it as Node }.withIndex())
             {
-                ++currentPartialInstantiationIndex
-                val rhsTemplateName = instanceTree.children[3]!!.toString()
-                val rhsTemplatePaChas = paChaMaps[rhsTemplateName]!!
-
                 // Compute PaChaMap for lhs of partial instantiation
-                val lhsName = instanceTree.children[0]!!.toString()
-                val parameterNode = instanceTree.children[1] as Node
+                val lhsName = partialInstTree.children[0]!!.toString()
+                val parameterNode = partialInstTree.children[1] as Node
                 val lhsPaChas = PaChaMap()
                 paChaMaps[lhsName] = lhsPaChas
-                if (parameterNode.isNotBlank()) {
-                    val (newNewSystem, newErrors) = mapPaChaDeclarations(path, newSystem, lhsPaChas, currentPartialInstantiationIndex)
-                    offset += newNewSystem.length - newSystem.length
-                    newSystem = newNewSystem
-                    errors.addAll(newErrors)
-                }
+                if (parameterNode.isNotBlank())
+                    errors += mapPaChaDeclarations(path, rewriter, lhsPaChas, partialInstIndex)
 
-                // Find all non-null arguments that correspond (wrt. location) to a (parameterized) channel parameter.
-                val rhsParamPaChas = rhsTemplatePaChas.values.filter { it.parameterIndex != null }
+                // Find all (parameterized) channel parameters of rhs.
+                val rhsTemplateName = partialInstTree.children[3]!!.toString()
+                val rhsParamPaChas = paChaMaps[rhsTemplateName]!!.values.filter { it.parameterIndex != null }
                 if (rhsParamPaChas.isEmpty())
                     continue
 
-                val arguments = getExpressionNodes(instanceTree.children[5] as Node)
+                // Find all (non-null) arguments that correspond (wrt. location) to a lhs channel parameter.
+                val arguments = getExpressionNodes(partialInstTree.children[5] as Node)
                 val argsAndParams = arguments.withIndex()
                     .map { arg -> Pair(arg.value, rhsParamPaChas.find { param -> arg.index == param.parameterIndex }) }
                     .filter { it.first != null && it.second != null }
                     .map { Pair(it.first!!, it.second!!) }
 
-                for (argAndParam in argsAndParams)
-                {
-                    val argChannelName = argAndParam.first.toString().split(' ', limit = 3)[1]
-                    val argPaCha = globalPaChas[argChannelName] ?: lhsPaChas[argChannelName]
-                    if (argPaCha == null) {
-                        errors.add(createUppaalError(path, system, argAndParam.first, "'$argChannelName' is not a parameterized channel (or channel-array).", true))
+                // Unfold parameter-variables for each PaCha-variable.
+                for ((fullArgument, paramPaChaInfo) in argsAndParams) {
+                    val argChannelName = fullArgument.toString().split(' ', limit = 3)[1]
+                    val argPaChaInfo = globalPaChas[argChannelName] ?: lhsPaChas[argChannelName]
+                    if (argPaChaInfo == null) {
+                        errors += createUppaalError(path, system, fullArgument, "'$argChannelName' is not a parameterized channel(-array).", true)
                         continue
                     }
 
-                    val argHasSubscript = argAndParam.first.toString().split(' ', limit = 4)[2] == "["
-                    val argInputNumDimensions = if (argHasSubscript) 0 else argPaCha.numDimensions
+                    val argHasSubscript = fullArgument.toString().split(' ', limit = 4)[2] == "["
+                    val argInputNumDimensions = if (argHasSubscript) 0 else argPaChaInfo.numDimensions
 
-                    val paramPaCha = argAndParam.second
                     val newErrors = ArrayList<UppaalError>()
-                    if (argPaCha.numParameters != paramPaCha.numParameters)
-                        newErrors.add(createUppaalError(path, system, argAndParam.first, "'$argChannelName' has '${argPaCha.numParameters}' parameter(s), but '${paramPaCha.numParameters}' parameter(s) is/are required.", true))
-                    if (argInputNumDimensions != paramPaCha.numDimensions)
-                        newErrors.add(createUppaalError(path, system, argAndParam.first, "Argument with '$argChannelName' results in '${argInputNumDimensions}' dimensions(s), but '${paramPaCha.numDimensions}' dimensions(s) is/are required.", true))
-
-                    errors.addAll(newErrors)
-                    if (newErrors.isNotEmpty())
+                    if (argPaChaInfo.numParameters != paramPaChaInfo.numParameters)
+                        newErrors += createUppaalError(path, system, fullArgument, "Argument with '$argChannelName' has '${argPaChaInfo.numParameters}' parameter(s), but the formal parameter requires '${paramPaChaInfo.numParameters}' parameter(s).", true)
+                    if (argInputNumDimensions != paramPaChaInfo.numDimensions)
+                        newErrors += createUppaalError(path, system, fullArgument, "Argument with '$argChannelName' results in '${argInputNumDimensions}' dimensions(s), but the formal parameter requires '${paramPaChaInfo.numDimensions}' dimensions(s).", true)
+                    if (errors.addAll(newErrors))
                         continue
 
-                    val insertPosition = argAndParam.first.endPosition() + 1 + offset
-                    val argsToInsert = List(argPaCha.numParameters) { ", __${argChannelName}_p${it+1}" }.joinToString(separator = "")
-                    newSystem = newSystem.replaceRange(insertPosition, insertPosition, argsToInsert)
-                    offset += argsToInsert.length
+                    // Rewrite happens here
+                    val justAfterArgument = fullArgument.endPosition() + 1
+                    val argsToInsert = List(argPaChaInfo.numParameters) { "__${argChannelName}_p${it+1}" }
+
+                    rewriter.insert(justAfterArgument, ", ")
+                    rewriter.joinInsert(justAfterArgument, argsToInsert).forEach { operation ->
+                        operation.value.addBackMap()
+                            .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
+                            .overrideErrorRange { fullArgument.range() }
+                            .overrideErrorMessage { message -> "From PaCha auto generated arguments: $message" }
+                    }
                 }
             }
 
-            return Pair(newSystem, errors)
+            return Pair(rewriter.getRewrittenText(), errors)
         }
 
         private fun getExpressionNodes(expressionListNode: Node): List<Node?>
         {
             if (expressionListNode.isBlank())
                 return listOf()
-            return getOptionalNodes(expressionListNode)
-        }
 
-        private fun getParameterNodes(parameterListNode: Node): List<Node?>
-        {
-            if (parameterListNode.isBlank() || parameterListNode.children[1]!!.isBlank())
-                return listOf()
-            val trueListNode = (parameterListNode.children[1]!! as Node).children[0] as Node
-            return getOptionalNodes(trueListNode)
-        }
-
-        private fun getOptionalNodes(optionalNodeListNode: Node): List<Node?> {
-            val optionalNodes =
-                arrayListOf(optionalNodeListNode.children[0] as Node)
-                    .plus(
-                        (optionalNodeListNode.children[1] as Node).children.map { (it as Node).children[1] as Node }
-                    )
+            val optionalNodes = arrayListOf(expressionListNode.children[0] as Node) +
+                    (expressionListNode.children[1] as Node).children.map { (it as Node).children[1] as Node }
 
             return optionalNodes.map {
                 if (it.isBlank()) null
@@ -501,17 +458,7 @@ class PaChaMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>): List<UppaalError> {
-            for (error in errors.filter { it.fromEngine }) {
-                val backMap = backMaps[error.range] ?: continue
-                if (backMap.second == PARAMETER_TYPE_HINT) {
-                    error.range = backMap.first
-                    error.message = "Unknown type name in channel parameter."
-                }
-                else
-                    throw Exception("Unhandled error type in PaChaMapper: ${backMap.second}")
-            }
-            return errors
-        }
+        override fun mapModelErrors(errors: List<UppaalError>)
+            = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 }

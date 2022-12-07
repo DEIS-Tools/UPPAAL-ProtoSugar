@@ -9,12 +9,13 @@ import unJsonFy
 
 class UppaalError {
     @Suppress("MemberVisibilityCanBePrivate")
-    val path: String
+    var path: String
     var range: LineColumnRange
     var message: String
     var context: String
     val isUnrecoverable: Boolean
-    val fromEngine: Boolean // If false -> is from mapper
+
+    var phaseIndex: Int = Int.MAX_VALUE
 
     constructor(path: UppaalPath, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean) {
         this.path = path.toString()
@@ -22,8 +23,6 @@ class UppaalError {
         this.message = message
         this.context = context
         this.isUnrecoverable = isUnrecoverable
-
-        this.fromEngine = false
     }
 
     constructor(path: String, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean) {
@@ -32,8 +31,6 @@ class UppaalError {
         this.message = message
         this.context = context
         this.isUnrecoverable = isUnrecoverable
-
-        this.fromEngine = true
     }
 
     override fun toString(): String {
@@ -76,8 +73,12 @@ class UppaalError {
     }
 }
 
+
 fun createUppaalError(path: UppaalPath, message: String, isUnrecoverable: Boolean = false): UppaalError
     = createUppaalError(path, "", IntRange.EMPTY, message, isUnrecoverable)
+
+fun createUppaalError(path: UppaalPath, code: String, message: String, isUnrecoverable: Boolean = false): UppaalError
+    = createUppaalError(path, code, code.indices, message, isUnrecoverable)
 
 fun createUppaalError(path: UppaalPath, code: String, node: ParseTree, message: String, isUnrecoverable: Boolean = false): UppaalError
     = createUppaalError(path, code, node.range(), message, isUnrecoverable)

@@ -2,12 +2,15 @@ package mapping.mappers
 
 import mapping.base.*
 import mapping.parsing.*
+import mapping.rewriting.ActivationRule
+import mapping.rewriting.BackMapResult
+import mapping.rewriting.Rewriter
 import uppaal_pojo.Declaration
 import uppaal_pojo.System
 
 class AutoArrMapper : Mapper {
-    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
-        = Triple(sequenceOf(Phase1()), null, null)
+    override fun getPhases()
+        = PhaseOutput(sequenceOf(Phase1()), null, null)
 
     private class Phase1 : ModelPhase() {
         private val arrayConfre = Confre(
@@ -16,6 +19,8 @@ class AutoArrMapper : Mapper {
             
             ${ConfreHelper.expressionGrammar}
         """.trimIndent())
+
+        val rewriters = HashMap<String, Rewriter>()
 
 
         init {
@@ -37,10 +42,10 @@ class AutoArrMapper : Mapper {
         }
 
         private fun mapAutoArrayInstantiations(code: String, path: UppaalPath): Pair<String, List<UppaalError>> {
+            val rewriter = Rewriter(code)
+            rewriters[path.toString()] = rewriter
+
             val errors = ArrayList<UppaalError>()
-            var offset = 0
-            var newCode = code
-            
             for (autoArr in arrayConfre.findAll(code).map { it as Node }) {
                 val dimSizes = getDimensionSizes(autoArr, code)
                 val dimVars  = getDimensionVariables(autoArr)
@@ -52,17 +57,29 @@ class AutoArrMapper : Mapper {
                 val defaultExprNode = autoArr.children[7]!!
                 val defaultExpr = code.substring(defaultExprNode.startPosition(), defaultExprNode.endPosition() + 1)
                 val sizesAndVars = dimSizes.filterNotNull().zip(dimVars)
-                val replacement = computeReplacement(sizesAndVars, defaultExpr)
 
-                newCode = newCode.replaceRange(autoArr.children[5]!!.startPosition() + offset, defaultExprNode.endPosition()+1 + offset, replacement)
-                offset += replacement.length - (defaultExprNode.endPosition() - autoArr.children[5]!!.startPosition() + 1)
+                val replaceRange = autoArr.range(5, 7)
+                val replacement = computeReplacement(sizesAndVars, defaultExpr)
+                val replaceOp = rewriter.replace(replaceRange, replacement)
+
+                val recurringErrors = HashSet<String>()
+                replaceOp.addBackMap()
+                    .activateOn(replacement.indices, ActivationRule.ACTIVATION_CONTAINS_ERROR) // On any array element
+                    .withPriority(1)
+                    .overrideErrorRange { autoArr.children[7]!!.range() } // Place on original expression
+                    .discardError { !recurringErrors.add(it.message) } // Discard if message seen before
+
+                replaceOp.addBackMap()
+                    .activateOn(replacement.indices, ActivationRule.INTERSECTS)
+                    .overrideErrorRange { autoArr.range() }
             }
 
-            return Pair(newCode, errors)
+            return Pair(rewriter.getRewrittenText(), errors)
         }
 
         private fun getConstantInts(code: String): ArrayList<Triple<IntRange, String, Int>> {
-            // TODO: Allow constant ARRAY-variables as size parameter? Constants that are computable?
+            // TODO: Allow constant ARRAY-variables as size parameter?
+            // TODO: Constants that are computable?
             val constInts = ArrayList<Triple<IntRange, String, Int>>()
             for (constInt in ConfreHelper.constIntConfre.findAll(code).map { it as Node }) {
                 val range = IntRange(constInt.startPosition(), constInt.endPosition())
@@ -100,38 +117,28 @@ class AutoArrMapper : Mapper {
         private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String>, path: UppaalPath, code: String, autoArr: Node): Collection<UppaalError> {
             val errors = ArrayList<UppaalError>()
             if (dimSizes.isEmpty())
-                errors.add(
-                    createUppaalError(
+                errors.add(createUppaalError(
                     path, code, autoArr.children[1]!!, "AutoArr-syntax requires at least one array dimension on variable '${autoArr.children[1]!!}'.", true
-                )
-                )
+                ))
             else if (dimVars.size != dimSizes.size)
-                errors.add(
-                    createUppaalError(
+                errors.add(createUppaalError(
                     path, code, autoArr.children[1]!!, "Array '${autoArr.children[1]!!}' must have an equal number of dimensions and dimension variables.", true
-                )
-                )
+                ))
 
             for (size in dimSizes.withIndex())
                 if (size.value == null)
-                    errors.add(
-                        createUppaalError(
+                    errors.add(createUppaalError(
                         path, code, autoArr.children[2]!!, "Cannot determine size of array dimension ${size.index+1} of ${dimSizes.size} in array '${autoArr.children[1]!!}'.", true
-                    )
-                    )
+                    ))
                 else if (size.value!! <= 0)
-                    errors.add(
-                        createUppaalError(
+                    errors.add(createUppaalError(
                         path, code, autoArr.children[2]!!, "Array dimension ${size.index+1} of ${dimSizes.size} in array '${autoArr.children[1]!!}' has non-positive size.", true
-                    )
-                    )
+                    ))
 
             if (dimVars.distinct().size != dimVars.size)
-                errors.add(
-                    createUppaalError(
+                errors.add(createUppaalError(
                     path, code, autoArr.children[5]!!, "Array '${autoArr.children[1]!!}' has duplicate dimension variable names.", true
-                )
-                )
+                ))
 
             return errors
         }
@@ -154,6 +161,7 @@ class AutoArrMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>) = errors // TODO: Filter/trans-locate errors on duplicated array elements?
+        override fun mapModelErrors(errors: List<UppaalError>)
+            = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 }

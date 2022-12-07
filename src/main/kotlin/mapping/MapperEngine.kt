@@ -43,18 +43,16 @@ class MapperEngine(private val mappers: List<Mapper>) {
         val newQueryPhases = ArrayList<QueryPhase>()
 
         for (mapper in mappers.map { it.getPhases() }) {
-            for (phase in mapper.first) {
-                val newErrors = visitNta(nta, UppaalPath(nta), phase)
-                errors.addAll(newErrors)
-                if (newErrors.any { it.isUnrecoverable })
+            for (phase in mapper.modelPhases) {
+                phase.phaseIndex = newModelPhases.size
+                errors.addAll(visitNta(nta, UppaalPath(nta), phase).onEach { it.phaseIndex = phase.phaseIndex })
+                if (errors.any { it.isUnrecoverable })
                     return errors
+                newModelPhases.add(phase)
             }
 
-            newModelPhases.addAll(mapper.first)
-            if (mapper.second != null)
-                newSimulatorPhases.add(mapper.second!!)
-            if (mapper.third != null)
-                newQueryPhases.add(mapper.third!!)
+            mapper.simulatorPhase?.let { newSimulatorPhases.add(it) }
+            mapper.queryPhase?.let { newQueryPhases.add(it) }
         }
 
         modelPhases = newModelPhases
@@ -93,7 +91,12 @@ class MapperEngine(private val mappers: List<Mapper>) {
     fun mapModelErrors(engineErrors: List<UppaalError>, mapperErrors: List<UppaalError>): List<UppaalError> {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
-        return reversePhases.fold(mapperErrors + engineErrors) { errors, mapper -> mapper.mapModelErrors(errors) }
+        return reversePhases.fold(mapperErrors + engineErrors) { errors, phase ->
+            // Each phase only maps errors with a larger phase index than itself. Errors with the same or lower index are
+            // not affected by the rewrites performed in the current phase (A phase only "errors on" the original text).
+            val (applicableErrors, delayedErrors) = errors.partition { it.phaseIndex > phase.phaseIndex }
+            phase.mapModelErrors(applicableErrors) + delayedErrors
+        }.sortedBy { it.phaseIndex } // Place ProtoSugar errors first
     }
     fun mapProcesses(processes: List<ProcessInfo>) {
         // Mapped in reverse order since the error is based on the last modelPhase's result
@@ -104,8 +107,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
 
     fun mapQuery(query: String): Pair<String, UppaalError?> {
         var finalQuery = query
-        for (phase in queryPhases ?: throw Exception("You must upload a model before you run a query"))
-        {
+        for (phase in queryPhases ?: throw Exception("You must upload a model before you run a query")) {
             val result = phase.mapQuery(finalQuery)
             if (null != result.second)
                 return Pair("", result.second)

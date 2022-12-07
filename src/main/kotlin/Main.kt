@@ -11,7 +11,7 @@ import kotlin.io.path.absolutePathString
 import kotlin.system.exitProcess
 
 
-private const val crashDetailsFilePath = "ProtoSugar-CrashDetails.txt"
+private const val CRASH_DETAILS_FILE_PATH = "ProtoSugar-CrashDetails.txt"
 
 private const val FILE_TAG = "-file"
 private const val OUTPUT_TAG = "-output"
@@ -19,7 +19,7 @@ private const val SERVER_TAG = "-server"
 private const val DEBUG_TAG = "-debug"
 private const val MAPPERS_TAG = "-mappers"
 
-private val mappers = mapOf(
+private val availableMappers = mapOf(
     Pair("PaCha", PaChaMapper()),
     Pair("AutoArr", AutoArrMapper()),
     Pair("TxQuan", TxQuanMapper()),
@@ -64,7 +64,7 @@ private const val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warn
 fun main(args: Array<String>)
 {
     val tags = getTags(args)
-    engine = MapperEngine(tags[MAPPERS_TAG]?.map { mappers[it]!! } ?: listOf())
+    engine = MapperEngine(tags[MAPPERS_TAG]?.map { availableMappers[it]!! } ?: listOf())
 
     when {
         tags.containsKey(FILE_TAG) -> runOnFile(File(tags[FILE_TAG]!![0]), tags[OUTPUT_TAG]?.let { File(it[0]) })
@@ -190,7 +190,7 @@ private fun runServer(server: String)
                 catch (ex: Exception) {
                     engine.clearCache()
                     writeException(ex)
-                    handleServerModeException(toGuiOutput, "GUI model input lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = true)
+                    handleServerModeException(toGuiOutput, "GUI model input lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = true)
                 }
                 finally {
                     toEngineBuffer = ""
@@ -209,7 +209,7 @@ private fun runServer(server: String)
                     }
                 }
                 catch (ex: Exception) {
-                    handleServerModeException(toGuiOutput, "GUI query input lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = false)
+                    handleServerModeException(toGuiOutput, "GUI query input lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = false)
                 }
                 finally {
                     toEngineBuffer = ""
@@ -241,7 +241,7 @@ private fun runServer(server: String)
                 }
                 catch (ex: Exception) {
                     writeException(ex)
-                    handleServerModeException(toGuiOutput, "Engine query error response lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = false)
+                    handleServerModeException(toGuiOutput, "Engine query error response lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = false)
                 }
                 finally {
                     toGuiBuffer = ""
@@ -255,7 +255,7 @@ private fun runServer(server: String)
                 }
                 catch (ex: Exception) {
                     writeException(ex)
-                    handleServerModeException(toGuiOutput, "Engine model error response lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = true)
+                    handleServerModeException(toGuiOutput, "Engine model error response lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = true)
                 }
                 finally {
                     toGuiBuffer = ""
@@ -277,7 +277,7 @@ private fun runServer(server: String)
                 }
                 catch (ex: Exception) {
                     writeException(ex)
-                    handleServerModeException(toGuiOutput, "Engine model success response lead to exception. See details: '${Path(crashDetailsFilePath).absolutePathString()}'", useModelErrorResponse = true)
+                    handleServerModeException(toGuiOutput, "Engine model success response lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = true)
                 }
                 finally {
                     toGuiBuffer = ""
@@ -410,7 +410,7 @@ private fun generateQueryErrorResponse(error: UppaalError): String
 
 
 private fun writeException(ex: Exception)
-    = File(crashDetailsFilePath).printWriter().use { out -> out.println("$ex\n${ex.stackTraceToString()}") }
+    = File(CRASH_DETAILS_FILE_PATH).printWriter().use { out -> out.println("$ex\n${ex.stackTraceToString()}") }
 
 
 private fun runDebug(server: String, inputFile: File, outputFile: File, errorFile: File)
@@ -472,6 +472,6 @@ private fun usage()
     println("    | $SERVER_TAG SERVER_RUN_CMD")
     println("    | $DEBUG_TAG SERVER_RUN_CMD STDIN_OUTPUT_PATH STDOUT_OUTPUT_PATH STDERR_OUTPUT_PATH")
     println("MAPPERS: $MAPPERS_TAG { MAPPER }")
-    println("MAPPER: ${mappers.keys.joinToString(" | ", transform = { "'$it'" })}")
+    println("MAPPER: ${availableMappers.keys.joinToString(" | ", transform = { "'$it'" })}")
     exitProcess(1)
 }

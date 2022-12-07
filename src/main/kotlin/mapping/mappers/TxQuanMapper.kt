@@ -4,10 +4,11 @@ import mapping.base.*
 import mapping.parsing.Confre
 import mapping.parsing.Leaf
 import mapping.parsing.ParseTree
+import mapping.rewriting.Rewriter
 
 class TxQuanMapper : Mapper {
-    override fun getPhases(): Triple<Sequence<ModelPhase>, SimulatorPhase?, QueryPhase?>
-        = Triple(sequenceOf(), null, TxQuanQueryPhase())
+    override fun getPhases()
+        = PhaseOutput(sequenceOf(), null, TxQuanQueryPhase())
 
     private class TxQuanQueryPhase : QueryPhase()
     {
@@ -47,66 +48,59 @@ class TxQuanMapper : Mapper {
             Array  :== '[' [Expression] ']' .
         """.trimIndent())
 
-        // newRange (inclusive), originalValue, originalRange (inclusive)
-        private val backMapToOriginalValue = ArrayList<Triple<IntRange, String, IntRange>>()
-        private var latestQueryInput = ""
-        private var latestQueryOutput = ""
+        var rewriter = Rewriter("")
 
 
         override fun mapQuery(query: String): Pair<String, UppaalError?> {
-            backMapToOriginalValue.clear()
-            latestQueryOutput =
-                queryGrammar.matchExact(query)?.let { smartMap(query, it) }
-                ?: naiveMap(query)
-            return Pair(latestQueryOutput, null)
+            rewriter = Rewriter(query)
+            val result = queryGrammar.matchExact(query)?.let { smartMap(it) } ?: naiveMap(query)
+            return Pair(result, null)
         }
 
-        private fun smartMap(query: String, queryTree: ParseTree): String {
+        private fun smartMap(queryTree: ParseTree): String {
             val textualQuantifierLeaves = queryTree
                 .postOrderWalk()
                 .filterIsInstance<Leaf>()
                 .filter { isTextualQuantifier(it) }
 
-            var newQuery = query
-            var offset = 0
             for (txQuan in textualQuantifierLeaves) {
-                val replacement = textualQuantifierStrings[txQuan.token!!.value]!!
-                newQuery = newQuery.replaceRange(txQuan.startPosition() + offset, txQuan.endPosition() + 1 + offset, replacement)
-                registerBackMap(IntRange(txQuan.startPosition(), txQuan.endPosition()), txQuan.token.value, replacement, offset)
-                offset += replacement.length - txQuan.length()
+                val originalVal = txQuan.token!!.value
+                val replacement = textualQuantifierStrings[originalVal]!!
+
+                rewriter.replace(txQuan.range(), replacement)
+                    .addBackMap()
+                    .overrideErrorRange { txQuan.range() }
+                    .overrideErrorContext { originalVal }
 
                 // AVOIDABLE requires negating the entire query
                 if (txQuan.token.value == eBoxNegated) {
-                    val insertPos = txQuan.endPosition() + 1 + offset + 1  // +1 twice to skip the space after E[] as well
-                    newQuery = newQuery.replaceRange(insertPos, insertPos, "not (")
-                    newQuery += ')'
+                    rewriter.insert(txQuan.endPosition() + 2, "not (")
+                    rewriter.append(")")
                 }
             }
 
-            return newQuery
+            return rewriter.getRewrittenText()
         }
 
         private fun naiveMap(query: String): String {
-            var offset = 0
-            var newQuery = query
-
             val allMatches = textualQuantifierStrings.flatMap {
-                Regex("(^|[^_A-Za-z0-9])" + "(${it.key})" + "([^_A-Za-z0-9]|\$)").findAll(newQuery).map { match -> Pair(it.value, match.groups[2]!!) }
+                Regex("(^|[^_A-Za-z0-9])" + "(${it.key})" + "([^_A-Za-z0-9]|\$)")
+                    .findAll(query)
+                    .map { match -> Pair(it.value, match.groups[2]!!) }
             }.sortedBy { it.second.range.first }
 
-            for (match in allMatches)
-            {
+            for (match in allMatches) {
                 val replacement = match.first
                 val toReplace = match.second
-                newQuery = newQuery.replaceRange(
-                    toReplace.range.first + offset,
-                    toReplace.range.last + 1 + offset,
-                    replacement)
-                registerBackMap(toReplace.range, toReplace.value, replacement, offset)
-                offset += replacement.length - toReplace.value.length
+                val originalVal = toReplace.value
+
+                rewriter.replace(toReplace.range, replacement)
+                    .addBackMap()
+                    .overrideErrorRange { toReplace.range }
+                    .overrideErrorContext { originalVal }
             }
 
-            return newQuery
+            return rewriter.getRewrittenText()
         }
 
         private fun isTextualQuantifier(leaf: Leaf): Boolean {
@@ -114,27 +108,9 @@ class TxQuanMapper : Mapper {
             return textualQuantifierStrings.contains(value)
         }
 
-        private fun registerBackMap(oldRange: IntRange, oldValue: String, newValue: String, offset: Int) {
-            val newStart = oldRange.first + offset
-            val newEnd = newStart + newValue.length - 1 // -1 for inclusive
-            val newRange = IntRange(newStart, newEnd)
-
-            backMapToOriginalValue.add(
-                Triple(newRange, oldValue, oldRange)
-            )
-        }
-
 
         override fun mapQueryError(error: UppaalError): UppaalError {
-            val errorRange = error.range.toIntRange(latestQueryOutput)
-
-            // If an error relates to a mapped element
-            val backMap = backMapToOriginalValue.find { it.first.first == errorRange.first && it.first.last == errorRange.last }
-            if (null != backMap) {
-                error.range = LineColumnRange.fromIntRange(latestQueryInput, backMap.third)
-                error.context = backMap.second
-            }
-
+            rewriter.backMapError(error)
             return error
         }
     }
