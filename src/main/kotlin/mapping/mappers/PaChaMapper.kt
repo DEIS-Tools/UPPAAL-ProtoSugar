@@ -28,13 +28,13 @@ class PaChaMapper : Mapper {
             TypeList :== '(' [Type] {',' [Type]} ')' .
             Type     :== ['&'] IDENT [TypeList] {Array} .
             
-            ${ConfreHelper.expressionGrammar}
+            ${ConfreHelper.baseExpressionGrammar}
         """.trimIndent())
 
         private val chanUseGrammar = Confre("""
             ChanUsage :== IDENT {Array} ['(' [['meta'] [Expression]] {',' [['meta'] [Expression]]} ')'] ('!' | '?') .
             
-            ${ConfreHelper.expressionGrammar}
+            ${ConfreHelper.baseExpressionGrammar}
         """.trimIndent())
 
         private val rewriters = HashMap<String, Rewriter>()

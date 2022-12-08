@@ -2,10 +2,11 @@ package mapping.base
 
 import java.lang.Exception
 
-/** A "UPPAAL style" start/end line/column values for some text. **/
+/** A "UPPAAL style" range with start/end line/column values for some text. **/
 data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine: Int, var endColumn: Int) {
     override fun toString(): String = "($beginLine, $beginColumn, $endLine, $endColumn)"
 
+    /** Get an index-range for some text based on this LineColumnRange. **/
     fun toIntRange(text: String): IntRange {
         var startIndex = -1
         var currentLine = 1
@@ -34,6 +35,7 @@ data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine
     }
 
     companion object {
+        /** Get the UPPAAL range for some text based on an index range of the same text. **/
         @JvmStatic
         fun fromIntRange(text: String, range: IntRange): LineColumnRange {
             val trueStart = range.first // Inclusive

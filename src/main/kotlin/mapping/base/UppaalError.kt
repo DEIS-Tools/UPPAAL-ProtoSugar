@@ -17,13 +17,8 @@ class UppaalError {
 
     var phaseIndex: Int = Int.MAX_VALUE
 
-    constructor(path: UppaalPath, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean) {
-        this.path = path.toString()
-        this.range = range
-        this.message = message
-        this.context = context
-        this.isUnrecoverable = isUnrecoverable
-    }
+    constructor(path: UppaalPath, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean)
+        : this(path.toString(), range, message, context, isUnrecoverable)
 
     constructor(path: String, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean) {
         this.path = path

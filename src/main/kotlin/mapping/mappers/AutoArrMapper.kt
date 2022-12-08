@@ -18,7 +18,7 @@ class AutoArrMapper : Mapper {
             """            
             AutoArray  :== ( 'int' | 'bool' ) IDENT {'[' (INT | IDENT) ']'} '=' '{' [IDENT {',' IDENT}] '->' Expression '}' ';' .
             
-            ${ConfreHelper.expressionGrammar}
+            ${ConfreHelper.baseExpressionGrammar}
         """.trimIndent())
 
         val rewriters = HashMap<String, Rewriter>()

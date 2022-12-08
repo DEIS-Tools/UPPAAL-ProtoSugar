@@ -2,6 +2,7 @@ package mapping.mappers
 
 import mapping.base.*
 import mapping.parsing.Confre
+import mapping.parsing.ConfreHelper
 import mapping.parsing.Leaf
 import mapping.parsing.ParseTree
 import mapping.rewriting.Rewriter
@@ -27,10 +28,6 @@ class TxQuanMapper : Mapper {
         )
 
         private val queryGrammar = Confre("""
-            IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-            INT = [0-9]+
-            BOOL = true|false
-            
             Query :== [Quantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .
             Quantifier :== ('A[]' | '$aBox')
                          | ('E<>' | '$eDiamond')
@@ -39,13 +36,7 @@ class TxQuanMapper : Mapper {
                          | '$eBoxNegated' .
             Subjection :== 'under' IDENT .
             
-            Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) ['.' IDENT] [(Binary|Assignment) Expression] .
-            Term       :== IDENT | INT | BOOL .
-            Unary      :== '+' | '-' | '!' | 'not' .
-            Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
-                         | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
-            Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
-            Array  :== '[' [Expression] ']' .
+            ${ConfreHelper.queryExpressionGrammar}
         """.trimIndent())
 
         var rewriter = Rewriter("")

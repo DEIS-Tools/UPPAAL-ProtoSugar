@@ -36,7 +36,9 @@ class SeCompMapper : Mapper {
         val numSubTemplateUsers = HashMap<String, FreeInstantiation>()              // String = Any-template or partial instantiation name
         val subTemToParent = HashMap<Pair<String, Int>, Triple<String, Int, Int>>() // Sub-template template name + index -> parent "template name", "user index", "index of the sub-template in it's parent"
         val backMapOfBubbledUpProcesses = HashMap<String, String>()                 // New placeholder partial inst name -> original partial inst or root template name.
-        val systemLine = HashMap<String, IntRange>() // system process1, process2, ..., process_n
+        val systemLine = LinkedHashMap<String, IntRange>() // system process1, ..., process_n + the ranges on which they reside in the "system declarations text".
+
+        val newToOldProcessNames = HashMap<String, String>()
 
         return PhaseOutput(
             sequenceOf(
@@ -44,8 +46,8 @@ class SeCompMapper : Mapper {
                 ReferenceCheckingPhase(subTemplates, baseSubTemplateUsers),
                 MappingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine, subTemToParent, backMapOfBubbledUpProcesses)
             ),
-            SeCompSimulatorPhase(subTemplates, baseSubTemplateUsers, subTemToParent, backMapOfBubbledUpProcesses),
-            SeCompQueryPhase()
+            SeCompSimulatorPhase(subTemplates, baseSubTemplateUsers, subTemToParent, backMapOfBubbledUpProcesses, newToOldProcessNames),
+            SeCompQueryPhase(backMapOfBubbledUpProcesses, newToOldProcessNames)
         )
     }
 
@@ -411,7 +413,6 @@ class SeCompMapper : Mapper {
         val backMapOfBubbledUpProcesses: HashMap<String, String> // New placeholder partial inst name -> original partial inst or root template name.
     ) : ModelPhase() {
         val totalNumInstances = HashMap<String, Int>() // Any-template name -> instance count
-        val partialToRootStartIndex = HashMap<String, Int>() // partial (or root) instance name -> start root instance index
 
         private val rewriters = HashMap<String, Rewriter>()
 
@@ -429,7 +430,7 @@ class SeCompMapper : Mapper {
 
             val nextSubTemIndex = HashMap<String, Int>()
             val stateVariables = StringBuilder("\n\n")
-            for (template in baseSubTemplateUsers.keys.plus(subTemplates.keys).distinct()) {
+            for (template in (baseSubTemplateUsers.keys + subTemplates.keys).distinct()) {
                 if (!totalNumInstances.containsKey(template))
                     continue
 
@@ -655,13 +656,10 @@ class SeCompMapper : Mapper {
 
             // Map all partial instantiations
             val errors = ArrayList<UppaalError>()
-            val nextRootIndices = HashMap<String, Int>() // root name -> next base index
             for (tree in ConfreHelper.partialInstantiationConfre.findAll(rewriter.originalText).map { it as Node }) {
                 val lhsName = tree.children[0]!!.toString()
+                val rootStartIndex = getRootStartIndex(lhsName)
                 val instantiationInfo = numSubTemplateUsers[lhsName] ?: continue
-
-                val rootTemplateName = getRootTemplate(lhsName)
-                val nextRootIndex = nextRootIndices.getOrPut(rootTemplateName) { 0 }
 
                 val isBaseOfOtherPartial = numSubTemplateUsers.any { it.value.baseTemplateName == lhsName }
                 val isDirectlyInstantiated = systemLine.containsKey(lhsName)
@@ -674,7 +672,7 @@ class SeCompMapper : Mapper {
                     // The solution is thus to generate a new "BaseTemplatePrime" partial instantiation in top of the
                     // base with the same parameters as the original base.
                     if (isDirectlyInstantiated)
-                        bubbleUp(instantiationInfo, errors, path, rewriter, lhsName, rootTemplateName, nextRootIndex, systemLineStartIndex, nextRootIndices)
+                        bubbleUp(instantiationInfo, errors, path, rewriter, lhsName, rootStartIndex, systemLineStartIndex)
 
                     // Add parameters to accept a user index and argument to pass on user index down the partial instantiation chain
                     val lshHasParentheses = tree.children[1]!!.isNotBlank()
@@ -702,16 +700,12 @@ class SeCompMapper : Mapper {
                     val parameterRanges = instantiationInfo.parameters
                     val rhsHasArgs = tree.children[5]!!.isNotBlank()
                     val argumentToAdd = if (!parameterRanges.contains(null) && parameterRanges.isNotEmpty())
-                        (if (rhsHasArgs) ", " else "") + generateUserIndexExpression(parameterRanges, nextRootIndex)
+                        (if (rhsHasArgs) ", " else "") + generateUserIndexExpression(parameterRanges, rootStartIndex)
                     else
-                        (if (rhsHasArgs) ", " else "") + nextRootIndex // Default "unique instance index"
+                        (if (rhsHasArgs) ", " else "") + rootStartIndex // Default "unique instance index"
 
                     val indexAfterLastRhsParameter = (tree.children[6]!!.endPosition()) // Index of end-parenthesis
                     rewriter.insert(indexAfterLastRhsParameter, argumentToAdd)
-
-                    // Add indexing and keep track of the next/current indices to use for the current root template
-                    partialToRootStartIndex[lhsName] = nextRootIndices[rootTemplateName]!!
-                    nextRootIndices[rootTemplateName] = nextRootIndices[rootTemplateName]!! + (totalNumInstances[lhsName] ?: 0)
                 }
             }
 
@@ -737,15 +731,24 @@ class SeCompMapper : Mapper {
             // Bubble up directly instantiated root templates
             for (instantiation in systemLine.filter { baseSubTemplateUsers.containsKey(it.key) }) {
                 val lhsName = instantiation.key
-                val nextRootIndex = nextRootIndices.getOrPut(lhsName) { 0 } // lhsName is already a root
                 val instantiationInfo = numSubTemplateUsers[lhsName]!!
-                bubbleUp(instantiationInfo, errors, path, rewriter, lhsName, lhsName, nextRootIndex, systemLineStartIndex, nextRootIndices)
+                bubbleUp(instantiationInfo, errors, path, rewriter, lhsName, getRootStartIndex(lhsName), systemLineStartIndex)
             }
 
             rewriter.insert(systemLineStartIndex, "\n")
             system.content = rewriter.getRewrittenText()
             return errors
         }
+
+        private fun getRootStartIndex(lhsName: String) =
+            if (lhsName !in systemLine.keys) 0 // Ignore since not instantiated anyway. Just need filler to not get UPPAAL errors
+            else {
+                val rootTemplateName = getRootTemplate(lhsName)
+                systemLine.keys
+                    .takeWhile { it != lhsName }
+                    .filter { rootTemplateName == getRootTemplate(it) }
+                    .sumOf { totalNumInstances[it]!! }
+            }
 
 
         /** Replace an instantiation on the system line with a new instantiation that does not contain a USER/STEM-index parameter,
@@ -756,10 +759,8 @@ class SeCompMapper : Mapper {
             path: UppaalPath,
             rewriter: Rewriter,
             lhsName: String,
-            rootTemplateName: String,
             nextRootIndex: Int,
-            systemLineStartIndex: Int,
-            nextRootIndices: HashMap<String, Int>
+            systemLineStartIndex: Int
         ) {
             if (null in instantiationInfo.parameters) {
                 errors += createUppaalError(
@@ -786,9 +787,6 @@ class SeCompMapper : Mapper {
                 .addBackMap()
                 .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
                 .overrideErrorRange { systemLine[lhsName]!! }
-
-            partialToRootStartIndex[lhsPrimeName] = nextRootIndices[rootTemplateName]!!
-            nextRootIndices[rootTemplateName] = nextRootIndices[rootTemplateName]!! + getTotalInstancesFromParams(instantiationInfo)
 
             backMapOfBubbledUpProcesses[lhsPrimeName] = lhsName
         }
@@ -841,7 +839,8 @@ class SeCompMapper : Mapper {
         val subTemplates: HashMap<String, SubTemplateInfo>,
         val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
         val subTemToParent: HashMap<Pair<String, Int>, Triple<String, Int, Int>>,
-        val backMapOfBubbledUpProcesses: HashMap<String, String>
+        val backMapOfBubbledUpProcesses: HashMap<String, String>,
+        val newToOldProcessNames: HashMap<String, String>
     ) : SimulatorPhase() {
         override fun mapProcesses(processes: List<ProcessInfo>) {
             // TODO: Mappings to/from? auto-generated padding-partial-instantiation names?
@@ -877,7 +876,9 @@ class SeCompMapper : Mapper {
                                 subTemInstanceName = "${currentTem.drop(SUB_TEMPLATE_NAME_PREFIX.length)}($nextAutoGeneratedSubTemIndex)"
                                 subTemInstanceCount[Pair(parentInstanceName, currentTem)] = nextAutoGeneratedSubTemIndex + 1
                             }
-                            process.name = "${parentInstanceName}.$subTemInstanceName"
+                            val newName = "${parentInstanceName}.$subTemInstanceName"
+                            newToOldProcessNames[newName] = process.name
+                            process.name = newName
                             if (isUser)
                                 userTemplateAndIndexToName[subTemId] = process.name
                             finishedMappings.add(process)
@@ -902,8 +903,22 @@ class SeCompMapper : Mapper {
     }
 
 
-    private class SeCompQueryPhase : QueryPhase() {
+    private class SeCompQueryPhase(
+        val backMapOfBubbledUpProcesses: HashMap<String, String>,
+        val newToOldProcessNames: HashMap<String, String>
+    ) : QueryPhase() {
+        private val locationExpression = Confre("""
+            LocExpr :== Part {'.' [Part]}
+            Part    :== Term ['(' [Expression {',' Expression}] ')']
+            
+            ${ConfreHelper.baseExpressionGrammar}
+        """.trimIndent())
+
+        var rewriter: Rewriter? = null
+
         override fun mapQuery(query: String): Pair<String, UppaalError?> {
+            rewriter = Rewriter(query)
+
             // TODO: Find a way to map SubTem end-state to some other conditions, since the end state is never actually reached
             // TODO: SubTemplates wait in start state, queries to such start states should only work when SubTem is active
 
@@ -913,6 +928,7 @@ class SeCompMapper : Mapper {
         }
 
         override fun mapQueryError(error: UppaalError): UppaalError {
+            rewriter!!.backMapError(error)
             return error
         }
     }

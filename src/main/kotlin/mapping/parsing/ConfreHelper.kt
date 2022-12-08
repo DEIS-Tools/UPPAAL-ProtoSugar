@@ -3,25 +3,33 @@ package mapping.parsing
 @Suppress("MemberVisibilityCanBePrivate")
 class ConfreHelper {
     companion object {
-        val expressionGrammar = """
+        private fun expressionGenerator(withDotting: Boolean): String {
+            val dotting = if (withDotting) "{'.' [ExtendedTerm]}" else ""
+            return """
                 IDENT = [_a-zA-Z][_a-zA-Z0-9]*
-                INT = [0-9]+
-                BOOL = true|false
+                INT   = [0-9]+
+                BOOL  = true|false
             
-                Expression :== [Unary] ('(' Expression ')' | (Term [{Array} | '(' [Expression {',' Expression}] ')'])) [(Binary|Assignment) Expression] .
-                Term       :== IDENT | INT | BOOL .
-                Unary      :== '+' | '-' | '!' | 'not' .
-                Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
-                             | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
-                Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
-                Array  :== '[' [Expression] ']' .
+                Expression   :== [Unary] ('(' Expression ')' | ExtendedTerm $dotting) [(Binary|Assignment) Expression] .
+                ExtendedTerm :== Term [{Array} | '(' [Expression {',' Expression}] ')'] .
+                Term         :== IDENT | INT | BOOL .
+                Array        :== '[' [Expression] ']' .
+                
+                Unary        :== '+' | '-' | '!' | 'not' .
+                Binary       :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
+                               | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
+                Assignment   :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
             """.trimIndent()
+        }
+
+        val queryExpressionGrammar = expressionGenerator(true)
+        val baseExpressionGrammar = expressionGenerator(false)
 
         // TODO: Support for structs?
         val regularTypeAndExpressionGrammar = """
             Type   :== ['const'] IDENT ['[' [Expression] ',' [Expression] ']' | '(' [Type] {',' [Type]} ')'] .
             
-            $expressionGrammar
+            $baseExpressionGrammar
         """.trimIndent()
 
 
@@ -37,13 +45,13 @@ class ConfreHelper {
             """
             ConstInt :== 'const' 'int' ['[' [Expression] ',' [Expression] ']'] IDENT '=' Expression ';' .
             
-            $expressionGrammar
+            $baseExpressionGrammar
         """.trimIndent())
 
         val expressionAssignmentListConfre = Confre("""
             ExprList :== Expression {',' Expression} .
             
-            $expressionGrammar
+            $baseExpressionGrammar
         """.trimIndent())
 
         val systemLineConfre = Confre("""
