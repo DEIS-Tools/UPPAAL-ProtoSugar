@@ -1,6 +1,9 @@
 package mapping.parsing
 
-import java.lang.Exception
+import java.util.*
+import kotlin.Exception
+import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 import java.lang.Character.MIN_VALUE as nullChar
 
 // A "context free grammar"-approximately-equivalent of the "Regex" class.
@@ -102,7 +105,8 @@ class Confre(grammar: String) {
             val parseTree = grammarParser.find(grammar, startIndex)
                             ?: throw Exception("Could not parse non-terminal '$name'")
 
-            nonTerminals[name] = NonTerminal(name, parseNonTerminal(parseTree))
+            nonTerminals.put(name, NonTerminal(name, parseNonTerminal(parseTree))) ?: continue
+            throw Exception("A non-terminal '$name' does already exist!")
         }
         rootNonTerminal = nonTerminalsToParse.first().groups[1]!!.value
     }
@@ -348,7 +352,7 @@ class Confre(grammar: String) {
             var matchVal: ParseTree? = match(string, startIndex = 0, allowPartialMatch = true)
             while (matchVal != null) {
                 yield(matchVal)
-                matchVal = match(string, matchVal.endPosition(), allowPartialMatch = true)
+                matchVal = match(string, matchVal.endPosition() + 1, allowPartialMatch = true)
             }
         }
     }
@@ -537,6 +541,7 @@ interface ParseTree {
 
     fun preOrderWalk(): Sequence<ParseTree>
     fun postOrderWalk(): Sequence<ParseTree>
+    fun tokens(): Sequence<Token>
 
     fun asNode(): Node = this as Node
     fun asLeaf(): Leaf = this as Leaf
@@ -561,6 +566,9 @@ class Node(override val grammar: Grammar, val children: List<ParseTree?>) : Pars
         yield(this@Node)
     }
 
+    override fun tokens(): Sequence<Token>
+        = children.filterNotNull().asSequence().flatMap { it.tokens() }
+
     override fun toString() = children.joinToString(" ")
 }
 
@@ -575,19 +583,105 @@ class Leaf(override val grammar: Grammar, val token: Token?) : ParseTree {
 
     override fun preOrderWalk(): Sequence<ParseTree> = sequenceOf(this@Leaf)
     override fun postOrderWalk(): Sequence<ParseTree> = sequenceOf(this@Leaf)
+    override fun tokens(): Sequence<Token> = token?.let { sequenceOf(it) } ?: sequenceOf()
 
     override fun toString() = token?.value ?: ""
 }
 
-class BufferedIterator<T>(private val iterator: Iterator<T>) {
-    private var current: T? = null
 
-    fun current(): T = current ?: throw Exception("Iteration has not yet started. Call 'next()' first")
+/** Iterates all nodes in a ParseTree in pre-order walk, but also supports skipping the current subtree, where the
+ * current node/leaf is the root of said subtree (see 'nextAfterCurrentSubtree()'). **/
+class TreeIterator(val root: ParseTree) : Iterator<ParseTree> {
+    private data class Index(val subTree: ParseTree, var childIndex: Int?) {
+        fun tryMoveNextNonNullChild(): Boolean {
+            if (subTree is Leaf)
+                return false
 
-    fun hasNext(): Boolean = iterator.hasNext()
+            val node = subTree.asNode()
+            do
+                childIndex = (childIndex ?: -1) + 1
+            while (childIndex!! < node.children.size && null == node.children[childIndex!!])
 
-    fun next(): T {
-        current = iterator.next()
-        return current!!
+            return childIndex!! < node.children.size
+        }
+
+        fun getCurrentChildIndex() = Index(subTree.asNode().children[childIndex!!]!!, null)
+    }
+    private val currentKeeper = Stack<Index>()
+    private var hasStated = false
+
+
+    override fun hasNext(): Boolean
+        = !hasStated || hasUnvisitedChildren() || hasUnvisitedSiblingOrCousin()
+
+    override fun next(): ParseTree {
+        if (currentKeeper.empty()) {
+            if (hasStated)
+                throw Exception("There are no more elements")
+            hasStated = true
+            currentKeeper.add(Index(root, null))
+            return root
+        }
+        return nextNonNullElement()
+    }
+
+
+    fun hasNextAfterCurrentSubTree(): Boolean {
+        if (!hasStated)
+            throw Exception("The iterator must have started before calling this method. Call 'next()' first")
+        return hasUnvisitedSiblingOrCousin()
+    }
+
+    fun nextAfterCurrentSubTree(): ParseTree {
+        if (currentKeeper.empty()) throw Exception("The iterator either hit the end or has not yet started")
+
+        return nextNonNullSubtree()
+    }
+
+
+    private fun nextNonNullElement(): ParseTree {
+        if (current() is Leaf || !hasUnvisitedChildren())
+            return nextNonNullSubtree()
+
+        val currentIndex = currentKeeper.peek()
+        currentIndex.tryMoveNextNonNullChild()
+        currentKeeper.add(currentIndex.getCurrentChildIndex())
+
+        return currentKeeper.peek().subTree
+    }
+
+    private fun nextNonNullSubtree(): ParseTree {
+        currentKeeper.pop()
+        while (currentKeeper.isNotEmpty() && !currentKeeper.peek().tryMoveNextNonNullChild())
+            currentKeeper.pop()
+        if (currentKeeper.empty())
+            throw Exception("There is no next non-blank subtree")
+
+        currentKeeper.add(currentKeeper.peek().getCurrentChildIndex())
+        return currentKeeper.peek().subTree
+    }
+
+
+    private fun hasUnvisitedChildren(): Boolean
+        = (currentKeeper.peek().subTree as? Node)?.children
+            ?.drop((currentKeeper.peek().childIndex ?: -1) + 1)
+            ?.filterNotNull()
+            ?.any()
+                ?: false
+
+    private fun hasUnvisitedSiblingOrCousin(): Boolean {
+        for (index in currentKeeper.reversed().drop(1)) {
+            val numVisitedChildren = (index.childIndex ?: throw Exception("This should not be possible. Very hard to explain why. Good luck and sorry if you see this.")) + 1
+            if (index.subTree.asNode().children.drop(numVisitedChildren).filterNotNull().any())
+                return true
+        }
+        return false
+    }
+
+
+    fun current(): ParseTree {
+        if (currentKeeper.empty())
+            throw Exception("The iterator either hit the end or has not yet started")
+        return currentKeeper.peek().subTree
     }
 }

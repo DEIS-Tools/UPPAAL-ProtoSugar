@@ -27,3 +27,16 @@ class ParseHelper {
         }
     }
 }
+
+class BufferedIterator<T>(private val iterator: Iterator<T>) {
+    private var current: T? = null
+
+    fun current(): T = current ?: throw Exception("Iteration has not yet started. Call 'next()' first")
+
+    fun hasNext(): Boolean = iterator.hasNext()
+
+    fun next(): T {
+        current = iterator.next()
+        return current!!
+    }
+}

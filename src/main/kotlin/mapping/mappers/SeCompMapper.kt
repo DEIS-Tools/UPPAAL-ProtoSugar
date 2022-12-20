@@ -3,12 +3,10 @@ package mapping.mappers
 import ensureStartsWith
 import mapping.*
 import mapping.base.*
-import mapping.parsing.Confre
-import mapping.parsing.ConfreHelper
-import mapping.parsing.Node
 import mapping.rewriting.BackMapResult
 import mapping.rewriting.Rewriter
 import createOrGetRewriter
+import mapping.parsing.*
 import mapping.rewriting.ActivationRule
 import offset
 import product
@@ -20,8 +18,9 @@ const val SUB_TEMPLATE_NAME_PREFIX = "__"
 const val SUB_TEMPLATE_USAGE_CLAMP = "::"
 
 class SeCompMapper : Mapper {
-    private data class SubTemplateInfo(val entryStateId: String?, val exitStateIds: List<String>, var isFaulty: Boolean = false)
-    private data class SubTemplateUsage(val insertLocationId: String, val subTemplateName: String, val subTemInstanceName: String?, val originalText: String)
+    private data class LocationSummary(val id: String, val name: String?)
+    private data class SubTemplateInfo(val entryLocation: LocationSummary?, val exitLocations: List<LocationSummary>, val subTemplateName: String, var isFaulty: Boolean = false)
+    private data class SubTemplateUsage(val insertLocationId: String, val subTemplateName: String, val subTemInstanceName: String?, val originalLocationText: String)
 
     // Related to a template or partial instantiation. If the name is used on the "system"-line, how many instances of "baseTemplate" will be made?
     // baseSubTemplateUserName = 'null': not part of partial instantiation, 'not null' = part of partial instantiation
@@ -29,34 +28,46 @@ class SeCompMapper : Mapper {
     private data class FreeInstantiation(val baseTemplateName: String?, val parameters: List<FreeParameter?>)
     private data class FreeParameter(val lowerRange: Int, val upperRange: Int, val name: String)
 
+    private data class InstanceSummary(val templateName: String, val stemOrUserIndex: Int)
+    private data class ParentUserInfo(val parentTemplateName: String, val parentUserIndex: Int, val subTemplateIndexInParent: Int)
+    private data class SubTemplateQueryMapInfo(
+        val nativeSubProcessName: String, val subTemplateIndex: Int, val subTemplateInfo: SubTemplateInfo,
+        val nativeParentProcessName: String, val parentInsertLocationName: String?
+    )
+
 
     override fun getPhases(): PhaseOutput {
+        val freeTypedefs = HashMap<String, Pair<Int, Int>?>() // 'not null' = int range, 'null' = scalar range
+        val constInts = HashMap<String, Int>()                // Maps typedefs to scalar or int ranges
+
         val subTemplates = HashMap<String, SubTemplateInfo>()                       // String = Sub-template name
         val baseSubTemplateUsers = HashMap<String, MutableList<SubTemplateUsage>>() // String = Any-template name
         val numSubTemplateUsers = HashMap<String, FreeInstantiation>()              // String = Any-template or partial instantiation name
-        val subTemToParent = HashMap<Pair<String, Int>, Triple<String, Int, Int>>() // Sub-template template name + index -> parent "template name", "user index", "index of the sub-template in it's parent"
+        val subTemToParent = HashMap<InstanceSummary, ParentUserInfo>()             // Sub-template template name + index -> "parent template name", "parent user index", "index of the sub-template in its parent"
         val backMapOfBubbledUpProcesses = HashMap<String, String>()                 // New placeholder partial inst name -> original partial inst or root template name.
-        val systemLine = LinkedHashMap<String, IntRange>() // system process1, ..., process_n + the ranges on which they reside in the "system declarations text".
+        val systemLine = LinkedHashMap<String, IntRange>()                          // system process1, ..., process_n + the ranges on which they reside in the "system declarations text".
 
-        val newToOldProcessNames = HashMap<String, String>()
+        val subTemplateQueryMapInfo = HashMap<String, SubTemplateQueryMapInfo>()
 
         return PhaseOutput(
             sequenceOf(
-                IndexingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine),
+                IndexingPhase(freeTypedefs, constInts, subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine),
                 ReferenceCheckingPhase(subTemplates, baseSubTemplateUsers),
                 MappingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine, subTemToParent, backMapOfBubbledUpProcesses)
             ),
-            SeCompSimulatorPhase(subTemplates, baseSubTemplateUsers, subTemToParent, backMapOfBubbledUpProcesses, newToOldProcessNames),
-            SeCompQueryPhase(backMapOfBubbledUpProcesses, newToOldProcessNames)
+            SeCompSimulatorPhase(subTemplates, baseSubTemplateUsers, subTemToParent, backMapOfBubbledUpProcesses, subTemplateQueryMapInfo),
+            SeCompQueryPhase(backMapOfBubbledUpProcesses, subTemplates, subTemplateQueryMapInfo, numSubTemplateUsers, baseSubTemplateUsers, freeTypedefs, constInts)
         )
     }
 
 
     private class IndexingPhase(
-        val subTemplates: HashMap<String, SubTemplateInfo>,
-        val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
-        val numSubTemplateUsers: HashMap<String, FreeInstantiation>,
-        val systemLine: HashMap<String, IntRange>
+        private val freeTypedefs: HashMap<String, Pair<Int, Int>?>,
+        private val constInts: HashMap<String, Int>,
+        private val subTemplates: HashMap<String, SubTemplateInfo>,
+        private val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
+        private val numSubTemplateUsers: HashMap<String, FreeInstantiation>,
+        private val systemLine: LinkedHashMap<String, IntRange>
     ) : ModelPhase() {
 
         private val freelyInstantiableTypedefGrammar = Confre("""
@@ -72,9 +83,6 @@ class SeCompMapper : Mapper {
             
             Param :== ['const'] ('int' '[' (INT | IDENT) ',' (INT | IDENT) ']' | 'scalar' '[' (INT | IDENT) ']' | IDENT) IDENT .
         """.trimIndent())
-
-        private val freeTypedefs = HashMap<String, Pair<Int, Int>?>() // 'not null' = int range, 'null' = scalar range
-        private val constInts = HashMap<String, Int>() // Maps typedefs to scalar or int ranges
 
         private val rewriters = HashMap<String, Rewriter>()
 
@@ -102,17 +110,19 @@ class SeCompMapper : Mapper {
 
             // Register as sub-template
             if (temName.startsWith(SUB_TEMPLATE_NAME_PREFIX)) {
-                val entryId = template.init?.ref // No init handled by UPPAAL
-                val exitIds = template.locations
+                val entryLocation = template.init?.let { init ->  // No init handled by UPPAAL
+                    LocationSummary(init.ref, template.locations.find { loc -> loc.id == init.ref }!!.name?.content)
+                }
+                val exitLocations = template.locations
                     .filter { loc -> template.transitions.all { tran -> tran.source.ref != loc.id } }
-                    .map { loc -> loc.id }
+                    .map { loc -> LocationSummary(loc.id, loc.name?.content) }
 
-                if (exitIds.isEmpty())
+                if (exitLocations.isEmpty())
                     errors.add(createUppaalError(
                         path, "A sub-template must have at least one exit location (location with no outgoing transitions)."
                     ))
 
-                if (template.transitions.none { it.source.ref == entryId })
+                if (template.transitions.none { it.source.ref == entryLocation?.id })
                     errors.add(createUppaalError(
                         path, "The entry state of a sub-template must have at least one outgoing transition."
                     ))
@@ -123,7 +133,7 @@ class SeCompMapper : Mapper {
                         path, template.parameter!!.content, template.parameter!!.content.indices, "Sub-templates currently do not support parameters."
                     ))
 
-                subTemplates[temName] = SubTemplateInfo(entryId, exitIds, isFaulty = template.init?.ref == null || errors.isNotEmpty())
+                subTemplates[temName] = SubTemplateInfo(entryLocation, exitLocations, temName, isFaulty = template.init?.ref == null || errors.isNotEmpty())
             }
 
             // Determine usage of sub-template(s)
@@ -359,8 +369,8 @@ class SeCompMapper : Mapper {
     }
 
     private class ReferenceCheckingPhase(
-        val subTemplates: HashMap<String, SubTemplateInfo>,
-        val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>
+        private val subTemplates: HashMap<String, SubTemplateInfo>,
+        private val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>
     ) : ModelPhase() {
         init {
             register(::verifyTemplate)
@@ -378,7 +388,7 @@ class SeCompMapper : Mapper {
                     val faultyLocationWithIndex = template.locations.withIndex().find { it.value.id == usage.insertLocationId }!!
                     val locationPath = path.plus(faultyLocationWithIndex)
                     errors.add(createUppaalError(
-                        locationPath, usage.originalText, usage.originalText.indices, "The template name '${usage.subTemplateName}' either does not exist or is not a sub-template.", true
+                        locationPath, usage.originalLocationText, usage.originalLocationText.indices, "The template name '${usage.subTemplateName}' either does not exist or is not a sub-template.", true
                     ))
                 }
 
@@ -405,14 +415,14 @@ class SeCompMapper : Mapper {
     }
 
     private class MappingPhase(
-        val subTemplates: HashMap<String, SubTemplateInfo>,
-        val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
-        val numSubTemplateUsers: HashMap<String, FreeInstantiation>,
-        val systemLine: HashMap<String, IntRange>,
-        val subTemToParent: HashMap<Pair<String, Int>, Triple<String, Int, Int>>, // subTem:name+instance -> parentTem:name + instance + subTemIndex
-        val backMapOfBubbledUpProcesses: HashMap<String, String> // New placeholder partial inst name -> original partial inst or root template name.
+        private val subTemplates: HashMap<String, SubTemplateInfo>,
+        private val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
+        private val numSubTemplateUsers: HashMap<String, FreeInstantiation>,
+        private val systemLine: LinkedHashMap<String, IntRange>,
+        private val subTemToParent: HashMap<InstanceSummary, ParentUserInfo>, // subTem:name+instance -> parentTem:name + instance + subTemIndex
+        private val backMapOfBubbledUpProcesses: HashMap<String, String> // New placeholder partial inst name -> original partial inst or root template name.
     ) : ModelPhase() {
-        val totalNumInstances = HashMap<String, Int>() // Any-template name -> instance count
+        private val totalNumInstances = HashMap<String, Int>() // Any-template name -> instance count
 
         private val rewriters = HashMap<String, Rewriter>()
 
@@ -479,7 +489,7 @@ class SeCompMapper : Mapper {
             val nextSubTemIndex = nextSubTemIndices[subTemName] ?: 0
             nextSubTemIndices[subTemName] = nextSubTemIndex + 1
 
-            subTemToParent[Pair(subTemName, nextSubTemIndex)] = Triple(userTemName, nextUserTemIndex, subTemIndexInUser)
+            subTemToParent[InstanceSummary(subTemName, nextSubTemIndex)] = ParentUserInfo(userTemName, nextUserTemIndex, subTemIndexInUser)
 
             return nextSubTemIndex
         }
@@ -543,7 +553,7 @@ class SeCompMapper : Mapper {
         /** For all entry and exit transitions, add updates and guards to register when control is given from the parent
          * template and to return control to the parent. **/
         private fun mapSubTemplate(path: UppaalPath, template: Template, subTemplateInfo: SubTemplateInfo) {
-            for (entryTransition in template.transitions.withIndex().filter { it.value.source.ref == subTemplateInfo.entryStateId }) {
+            for (entryTransition in template.transitions.withIndex().filter { it.value.source.ref == subTemplateInfo.entryLocation?.id }) {
                 val transitionPath = path.plus(entryTransition)
 
                 val guardLabel = entryTransition.value.labels.find { it.kind == "guard" }
@@ -560,7 +570,7 @@ class SeCompMapper : Mapper {
                 guardLabel.content = guardRewriter.getRewrittenText()
             }
 
-            for (exitTransition in template.transitions.withIndex().filter { it.value.target.ref in subTemplateInfo.exitStateIds }) {
+            for (exitTransition in template.transitions.withIndex().filter { subTemplateInfo.exitLocations.any { exit -> exit.id == it.value.target.ref } }) {
                 val transitionPath = path.plus(exitTransition)
 
                 val updateLabel = exitTransition.value.labels.find { it.kind == "assignment" }
@@ -575,7 +585,7 @@ class SeCompMapper : Mapper {
                 updateLabel.content = updateRewriter.getRewrittenText()
 
                 // Since sub-templates should be reusable, all transitions going to an exit state are redirected to the start state.
-                exitTransition.value.target.ref = subTemplateInfo.entryStateId!!
+                exitTransition.value.target.ref = subTemplateInfo.entryLocation!!.id
             }
 
             // Add "sub-template index" parameter which is used identify each instance of this template (as a sub-template)
@@ -838,23 +848,21 @@ class SeCompMapper : Mapper {
     private class SeCompSimulatorPhase(
         val subTemplates: HashMap<String, SubTemplateInfo>,
         val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
-        val subTemToParent: HashMap<Pair<String, Int>, Triple<String, Int, Int>>,
+        val subTemToParent: HashMap<InstanceSummary, ParentUserInfo>,
         val backMapOfBubbledUpProcesses: HashMap<String, String>,
-        val newToOldProcessNames: HashMap<String, String>
+        val subTemplateQueryMapInfo: HashMap<String, SubTemplateQueryMapInfo>
     ) : SimulatorPhase() {
         override fun mapProcesses(processes: List<ProcessInfo>) {
-            // TODO: Mappings to/from? auto-generated padding-partial-instantiation names?
-            // TODO: Mappings for query phase
-
             val subTemInstanceCount = HashMap<Pair<String, String>, Int>() // Parent instance name, SubTemplate name -> Sub template count
-            val userTemplateAndIndexToName = HashMap<Pair<String, Int>, String>() // Parent
+            val instanceToName = HashMap<InstanceSummary, String>() // Parent
 
             val finishedMappings = HashSet<ProcessInfo>()
             while (finishedMappings.size != processes.size) {
                 val nonPartialNextIndex = HashMap<String, Int>()
+
                 for (process in processes) {
-                    val currentIndex = nonPartialNextIndex.getOrPut(process.template) { 0 }
                     val currentTem = process.template
+                    val currentIndex = nonPartialNextIndex.getOrPut(currentTem) { 0 }
                     nonPartialNextIndex[currentTem] = nonPartialNextIndex[currentTem]!! + 1
                     if (finishedMappings.contains(process))
                         continue
@@ -863,24 +871,26 @@ class SeCompMapper : Mapper {
                     val isUser = baseSubTemplateUsers.containsKey(process.template)
 
                     if (isSubTem) {
-                        val subTemId = Pair(currentTem, currentIndex)
+                        val subTemId = InstanceSummary(currentTem, currentIndex)
                         val parentUserInfo = subTemToParent[subTemId]!!
-                        val parent = Pair(parentUserInfo.first, parentUserInfo.second)
-                        if (userTemplateAndIndexToName.containsKey(parent)) {
-                            val parentInstanceName = userTemplateAndIndexToName[parent]!!
-                            val parentTem = parentUserInfo.first
-                            val subTemUsageIndex = parentUserInfo.third
-                            var subTemInstanceName = baseSubTemplateUsers[parentTem]!![subTemUsageIndex].subTemInstanceName
+                        val parent = InstanceSummary(parentUserInfo.parentTemplateName, parentUserInfo.parentUserIndex)
+                        if (instanceToName.containsKey(parent)) {
+                            val parentInstanceName = instanceToName[parent]!!
+                            val subTemUsage = baseSubTemplateUsers[parentUserInfo.parentTemplateName]!![parentUserInfo.subTemplateIndexInParent]
+                            var subTemInstanceName = subTemUsage.subTemInstanceName
                             if (null == subTemInstanceName) {
                                 val nextAutoGeneratedSubTemIndex = subTemInstanceCount[Pair(parentInstanceName, currentTem)] ?: 0
                                 subTemInstanceName = "${currentTem.drop(SUB_TEMPLATE_NAME_PREFIX.length)}($nextAutoGeneratedSubTemIndex)"
                                 subTemInstanceCount[Pair(parentInstanceName, currentTem)] = nextAutoGeneratedSubTemIndex + 1
                             }
-                            val newName = "${parentInstanceName}.$subTemInstanceName"
-                            newToOldProcessNames[newName] = process.name
-                            process.name = newName
+                            val newStemName = "${parentInstanceName}.$subTemInstanceName"
+                            subTemplateQueryMapInfo[newStemName] = SubTemplateQueryMapInfo(
+                                process.name, currentIndex, subTemplates[currentTem]!!,
+                                parentInstanceName, subTemUsage.subTemInstanceName
+                            )
+                            process.name = newStemName
                             if (isUser)
-                                userTemplateAndIndexToName[subTemId] = process.name
+                                instanceToName[subTemId] = process.name
                             finishedMappings.add(process)
                             continue
                         }
@@ -891,8 +901,8 @@ class SeCompMapper : Mapper {
                         if (backMapOfBubbledUpProcesses.containsKey(baseName))
                             process.name = process.name.replace(baseName, backMapOfBubbledUpProcesses[baseName]!!)
 
-                        val userId = Pair(process.template, currentIndex)
-                        userTemplateAndIndexToName[userId] = process.name
+                        val userId = InstanceSummary(process.template, currentIndex)
+                        instanceToName[userId] = process.name
                         finishedMappings.add(process)
                     }
                     else
@@ -905,30 +915,429 @@ class SeCompMapper : Mapper {
 
     private class SeCompQueryPhase(
         val backMapOfBubbledUpProcesses: HashMap<String, String>,
-        val newToOldProcessNames: HashMap<String, String>
+        val subTemplates: HashMap<String, SubTemplateInfo>,
+        val subTemplateQueryMapInfo: HashMap<String, SubTemplateQueryMapInfo>,
+        val numSubTemplateUsers: HashMap<String, FreeInstantiation>,
+        val baseSubTemplateUsers: HashMap<String, MutableList<SubTemplateUsage>>,
+        val freeTypedefs: HashMap<String, Pair<Int, Int>?>,
+        val constInts: HashMap<String, Int>
     ) : QueryPhase() {
-        private val locationExpression = Confre("""
-            LocExpr :== Part {'.' [Part]}
-            Part    :== Term ['(' [Expression {',' Expression}] ')']
-            
-            ${ConfreHelper.baseExpressionGrammar}
-        """.trimIndent())
+        private val baseNameToBubbledUpNames = HashMap<String, String>()
 
-        var rewriter: Rewriter? = null
+        enum class FollowType {
+            NOTHING, SUBSCRIPTS, ARGUMENTS
+        }
+
+        enum class QuantifierType {
+            FORALL, EXISTS, SUM
+        }
+
+        data class QuantifierContext(
+            val quantifierVariable: Pair<String, QuantifierInfo>,
+            val dotExpressions: ArrayList<DotExpr> = ArrayList(),
+            val subContexts: ArrayList<QuantifierContext> = ArrayList()
+        )
+        data class QuantifierInfo(val variableRange: Pair<Int, Int>?, val quantifierType: QuantifierType)
+        data class DotExpr(val parts: List<Part>, val fullRange: IntRange)
+        data class Part(val identifier: String, val nameRange: IntRange, val followedBy: FollowType, val argumentsOrIndices: List<Pair<String, IntRange>>, val fullRange: IntRange)
+
+
+        /** 'subTemplatePathLength' is the number of parts from the start of the corresponding dotExpr that comprise the
+         * actual sub-template reference.
+         * 'info' is the information related to the type of sub-template referenced. **/
+        data class SubTemplateRef(val dotExprSubTemplatePathLength: Int, val info: SubTemplateInfo)
+
+
+        private val queryExprConfre = Confre(ConfreHelper.queryExpressionGrammar)
+        private var rewriter = Rewriter("")
+
 
         override fun mapQuery(query: String): Pair<String, UppaalError?> {
             rewriter = Rewriter(query)
 
-            // TODO: Find a way to map SubTem end-state to some other conditions, since the end state is never actually reached
-            // TODO: SubTemplates wait in start state, queries to such start states should only work when SubTem is active
+            // This "instantiation" is delayed since 'backMapOfBubbledUpProcesses' is empty before mapping is done.
+            if (baseNameToBubbledUpNames.isEmpty() && backMapOfBubbledUpProcesses.isNotEmpty())
+                for ((key, value) in backMapOfBubbledUpProcesses)
+                    baseNameToBubbledUpNames[value] = key
 
-            // TODO: Error if user queries a sub-template process directly??? (Must/should syntax go through root template?)
+            val error = try {
+                findDotExpressionContexts(query).firstNotNullOfOrNull { mapContextWithSideEffects(it) }
+            }
+            catch (ex: UppaalErrorException) {
+                ex.uppaalError
+            }
 
-            return Pair(query, null)
+            // Always rewrite query for back-mapping.
+            return Pair(rewriter.getRewrittenText(), error)
         }
 
+        private fun findDotExpressionContexts(query: String): Sequence<QuantifierContext>
+            = queryExprConfre.findAll(query).map {
+                fullExpr -> findDotExpressionContexts(fullExpr, QuantifierContext(Pair("", QuantifierInfo(Pair(0,-1), QuantifierType.FORALL))))
+            }
+
+        private fun findDotExpressionContexts(expression: ParseTree, currentContext: QuantifierContext): QuantifierContext {
+            val treeIterator = TreeIterator(expression)
+
+            treeIterator.next()
+            while (true) {
+                val currentNode = treeIterator.current() as? Node
+                if (null == currentNode) { // Will be 'null' if a Leaf was returned
+                    if (!treeIterator.hasNext())
+                        break
+                    treeIterator.next()
+                    continue
+                }
+
+                if (isDotExprNode(currentNode))
+                    currentContext.dotExpressions.add(getDotExprFromNode(currentNode))
+                else if (isQuantifierNode(currentNode)) {
+                    val quantifierType = when (val quan = currentNode.children[0]!!.toString()) {
+                        "forall" -> QuantifierType.FORALL
+                        "exists" -> QuantifierType.EXISTS
+                        "sum" -> QuantifierType.SUM
+                        else -> throw Exception("Unhandled quantifier type: '$quan'")
+                    }
+
+                    val quanVarName = currentNode.children[2]!!.toString()
+                    val quanVarType = rewriter.originalText.substring(currentNode.children[4]!!.range())
+
+                    val quanVarRange = freeTypedefs[quanVarType] ?: getRangeFromBoundedIntType(quanVarType)
+                    val subContext = QuantifierContext(Pair(quanVarName, QuantifierInfo(quanVarRange, quantifierType)))
+
+                    currentContext.subContexts.add(findDotExpressionContexts(currentNode.children[6]!!, subContext))
+                }
+                else {
+                    if (!treeIterator.hasNext())
+                        break
+                    treeIterator.next()
+                    continue
+                }
+
+                if (!treeIterator.hasNextAfterCurrentSubTree())
+                    break
+                treeIterator.nextAfterCurrentSubTree()
+            }
+
+            return currentContext
+        }
+
+        private fun isDotExprNode(node: Node): Boolean {
+            if (node.children.size != 2)
+                return false
+
+            val (first, second) = node.children.map { it as Node }
+            if ((first.grammar as? NonTerminalRef)?.nonTerminalName != "ExtendedTerm")
+                return false
+            if (second.grammar !is Multiple || second.children.isEmpty())
+                return false
+
+            return true
+        }
+
+        private fun isQuantifierNode(node: Node): Boolean
+            = (node.grammar as? NonTerminalRef)?.nonTerminalName == "Quantifier"
+
+        private fun getDotExprFromNode(node: Node): DotExpr {
+            val fullRange = node.range()
+            val terms = listOf(node.children[0]!!.asNode()).plus( // Take the "root" terms in the dot expression
+                node.children[1]!!.asNode().children.map {
+                    it!!.asNode().children[1]!!.asNode().children.first() as Node? // Take all (nullable) terms in the following "{'.' [ExtendedTerm]}"
+                        ?: throw UppaalErrorException(createUppaalError(
+                            UppaalPath(), rewriter.originalText, node.range(), "Blank term in dot-expression '${rewriter.originalText.substring(node.range())}'", ""
+                        ))
+                })
+
+            val parts = terms.map { partNode ->
+                val baseName = partNode.children[0]!!.toString()
+                val nameRange = partNode.children[0]!!.range()
+                val (followedBy, argumentsOrIndices) = getArgumentsOrIndices(partNode)
+                val fullPartRange = partNode.range()
+
+                Part(baseName, nameRange, followedBy, argumentsOrIndices, fullPartRange)
+            }
+
+            return DotExpr(parts, fullRange)
+        }
+
+        private fun getArgumentsOrIndices(extendedTerm: Node): Pair<FollowType, List<Pair<String, IntRange>>> {
+            if (extendedTerm.children[1]!!.isBlank())
+                return Pair(FollowType.NOTHING, listOf())
+
+            return when (val firstTokenFollowingName = extendedTerm.children[1]!!.tokens().first().value) {
+                "(" -> Pair(FollowType.ARGUMENTS, getArguments(extendedTerm.children[1]!!.asNode().children[0]!!.asNode().children[1]!!.asNode()))
+                "[" -> Pair(FollowType.SUBSCRIPTS, getIndices(extendedTerm.children[1]!!.asNode().children[0]!!.asNode()))
+                else -> throw Exception("Unhandled character following term: '$firstTokenFollowingName'")
+            }
+        }
+
+        private fun getArguments(listOfArgumentNode: Node): List<Pair<String, IntRange>> {
+            if (listOfArgumentNode.isBlank())
+                return listOf()
+
+            val argumentNodes = listOf(listOfArgumentNode.children[0]!!).plus(
+                listOfArgumentNode.children[1]!!.asNode().children.map { it!!.asNode().children[1]!!.asNode() }
+            )
+
+            return argumentNodes.map { arg ->
+                val range = arg.range()
+                Pair(rewriter.originalText.substring(range), range)
+            }
+        }
+
+        private fun getIndices(subscriptListNode: Node): List<Pair<String, IntRange>>
+            = subscriptListNode.children.filterNotNull()
+                .map { subscript ->
+                    val expression = subscript.asNode().children[1]!!
+                    val range = expression.range()
+                    val value = rewriter.originalText.substring(range)
+                    Pair(value, range)
+                }
+
+
+        private fun mapContextWithSideEffects(context: QuantifierContext, quantifierVars: LinkedHashMap<String, QuantifierInfo> = LinkedHashMap()): UppaalError? {
+            for (dotExpr in context.dotExpressions) {
+                val firstPart = dotExpr.parts[0]
+                if (firstPart.followedBy == FollowType.SUBSCRIPTS)
+                    continue // If followed by [], it cannot be a process.
+
+                // 2 parts => Just a normal "process.locationOrVariable"
+                if (dotExpr.parts.size == 2) {
+                    if (baseNameToBubbledUpNames.containsKey(firstPart.identifier))
+                        rewriter.replace(firstPart.nameRange, baseNameToBubbledUpNames[firstPart.identifier]!!)
+                            .addBackMap()
+                            .activateOn(ActivationRule.ERROR_CONTAINS_ACTIVATION)
+                            .overrideErrorRange { dotExpr.fullRange }
+                            .overrideErrorMessage { it.replace(baseNameToBubbledUpNames[firstPart.identifier]!!, firstPart.identifier) }
+                            .overrideErrorContext { it.replace(baseNameToBubbledUpNames[firstPart.identifier]!!, firstPart.identifier) }
+                }
+                else {
+                    val subTemRef = getSubTemplateRef(dotExpr)
+                        ?: continue
+
+                    // Check if quantifier variables cause the dotExpr to reference more than one sub-template instance.
+                    val referencesMultiple = dotExpr.parts[0].argumentsOrIndices
+                        .map { argumentInfo -> argumentInfo.first }
+                        .any { argument -> quantifierVars.containsKey(argument) }
+
+                    if (referencesMultiple) {
+                        rewriter.replace(dotExpr.fullRange, mapMultiRefDotExpr(dotExpr, subTemRef, quantifierVars))
+                            .addBackMap()
+                            .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
+                            .overrideErrorRange { dotExpr.fullRange }
+                    }
+                    else {
+                        val newDotExpr = mapDotExpr(dotExpr, subTemRef)
+                        val originalDotExpr = rewriter.originalText.substring(dotExpr.fullRange)
+                        rewriter.replace(dotExpr.fullRange, newDotExpr)
+                            .addBackMap()
+                            .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
+                            .overrideErrorRange { dotExpr.fullRange }
+                            .overrideErrorMessage { it.replace(newDotExpr, originalDotExpr) }
+                            .overrideErrorContext { it.replace(newDotExpr, originalDotExpr) }
+                    }
+                }
+            }
+
+            for (subContext in context.subContexts) {
+                val newQuantifierVars = LinkedHashMap(quantifierVars)
+                // If the range of a quantifier is null, the mapper simply could not determine this range.
+                // It will only become an error if the mapper requires this range for rewriting.
+                newQuantifierVars[subContext.quantifierVariable.first] = subContext.quantifierVariable.second
+                return mapContextWithSideEffects(subContext, newQuantifierVars)
+                    ?: continue
+            }
+
+            return null
+
+            // TODO: Query for "Exit" state reachability is impossible with current mapping and multiple end states
+            //  since we don't know which exit state was entered.
+            // "STEM_ACTIVE_${template.name.content!!}[STEM_INDEX] = false"
+        }
+
+        private fun getSubTemplateRef(dotExpr: DotExpr): SubTemplateRef? {
+            val rootTemplateName = getRootTemplate(dotExpr.parts[0].identifier) ?: return null
+            var currentSubTemplateUser = baseSubTemplateUsers[rootTemplateName]!!
+            var currentSubTemplateName: String? = null
+            var subTemplatePathLength = 1
+
+            // Find the potentially references sub-template. Cannot be first, since this is the root user.
+            // Cannot be last since this is a location, variable, or function. Thus, we drop first and last.
+            for (part in dotExpr.parts.drop(1).dropLast(1)) {
+                if (part.followedBy != FollowType.NOTHING) // If there is a [] or (), this cannot be a sub-tem reference
+                    break
+
+                // Break if the part-identifier is not a sub-template, otherwise, get the template name of the sub-template.
+                currentSubTemplateName = currentSubTemplateUser
+                    .find { it.subTemInstanceName == part.identifier }
+                    ?.subTemplateName
+                    ?: break
+
+                subTemplatePathLength += 1
+
+                // If the sub-template just found is not a user, break since remaining parts cannot be a sub-template
+                currentSubTemplateUser = baseSubTemplateUsers[currentSubTemplateName] ?: break
+            }
+
+            val subTemplateInfo = subTemplates[currentSubTemplateName ?: return null] ?: return null
+            return SubTemplateRef(subTemplatePathLength, subTemplateInfo)
+        }
+
+        private fun mapDotExpr(dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVarValues: HashMap<String, Int> = HashMap()): String {
+            val resolvedName = resolveSubProcessName(dotExpr, subTemRef, quantifierVarValues)
+            val subProcessInfo = subTemplateQueryMapInfo[resolvedName] ?: throw Exception("Cannot find info for process: '$resolvedName'")
+
+            val resolvedDotExpr = "${subProcessInfo.nativeSubProcessName}." + dotExpr.parts.drop(subTemRef.dotExprSubTemplatePathLength).joinToString(".") {
+                var result = it.identifier
+                if (it.followedBy == FollowType.ARGUMENTS) {
+                    result += it.argumentsOrIndices.joinToString(",", "(", ")")
+                }
+                if (it.followedBy == FollowType.SUBSCRIPTS) {
+                    result += it.argumentsOrIndices.joinToString("") { sub -> "[$sub]" }
+                }
+                result
+            }
+            val lastPart = dotExpr.parts.last()
+            val stemActive = "STEM_ACTIVE_${subProcessInfo.subTemplateInfo.subTemplateName}[${subProcessInfo.subTemplateIndex}]"
+
+            // If dotExpr cannot possibly query a location
+            if (dotExpr.parts.size - subTemRef.dotExprSubTemplatePathLength != 1 || lastPart.followedBy != FollowType.NOTHING)
+                return resolvedDotExpr
+
+            // If the dotExpr references the entry location of the sub-template
+            if (subProcessInfo.subTemplateInfo.entryLocation!!.name == lastPart.identifier)
+                return "($resolvedDotExpr && $stemActive)"
+
+            // If the dotExpr references the/an exit location of the sub-template
+            if (subProcessInfo.subTemplateInfo.exitLocations.any { loc -> loc.name == lastPart.identifier }) {
+                if (subProcessInfo.subTemplateInfo.exitLocations.size != 1)
+                    throw UppaalErrorException(createUppaalError(
+                        UppaalPath(), rewriter.originalText, dotExpr.fullRange, "SeComp mapper currently cannot query the reachability of an exist state on a sub-template with multiple exit states"
+                    ))
+
+                // If parent name has been bubbled up, the name from the process info must be rewritten
+                val fullParentProcessName = subProcessInfo.nativeParentProcessName
+                val parentProcessNameWithoutArgs = fullParentProcessName.substringBefore('(')
+                val parentIsBubbledUp = baseNameToBubbledUpNames.containsKey(parentProcessNameWithoutArgs)
+                val trueParentName = if (!parentIsBubbledUp) fullParentProcessName
+                                     else fullParentProcessName.replace(parentProcessNameWithoutArgs, baseNameToBubbledUpNames[parentProcessNameWithoutArgs]!!)
+
+                return "(${trueParentName}.${subProcessInfo.parentInsertLocationName} && !$stemActive)"
+            }
+
+            // Likely a reference to a variable or non-entry/exit location.
+            return resolvedDotExpr
+        }
+
+        private fun mapMultiRefDotExpr(dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVars: LinkedHashMap<String, QuantifierInfo>): String {
+            // Find the quantifier variables that are important for determining
+            val significantQuantifierVars = quantifierVars
+                .filter { quanVar -> dotExpr.parts[0].argumentsOrIndices.any { arg -> arg.first == quanVar.key } }
+
+            val unfoldedExpressions = getAllQuantifierVarValueCombinations(significantQuantifierVars)
+                .map { varAlloc -> Pair(mapDotExpr(dotExpr, subTemRef, varAlloc), varAlloc) }
+
+            val currentQuantifierType = quantifierVars.entries.last().value.quantifierType
+            return if (currentQuantifierType == QuantifierType.SUM)
+                "(${unfoldedExpressions.fold("0/-1") { acc, pair -> 
+                    "${getQuantifierVarMatchExpr(pair.second)} ? ${pair.first} : ($acc)" 
+                }})"
+            else
+                "(${unfoldedExpressions.joinToString(" && ") { pair -> 
+                    "(${getQuantifierVarMatchExpr(pair.second)} imply ${pair.first})" 
+                }})"
+        }
+
+        fun getQuantifierVarMatchExpr(allocation: HashMap<String, Int>)
+            = allocation.entries.joinToString(" && ", "(", ")") { "${it.key} == ${it.value}" }
+
+        private fun getAllQuantifierVarValueCombinations(significantQuantifierVars: Map<String, QuantifierInfo>): Sequence<HashMap<String, Int>> = sequence {
+            val values = LinkedHashMap(significantQuantifierVars.map {
+                Pair(it.key, it.value.variableRange?.first ?: throw UppaalErrorException(createUppaalError(
+                    UppaalPath(), "SeComp cannot resolve the value range of the quantifier variable: '${it.key}'"
+                )))
+            }.toMap())
+
+            val numCombinations = significantQuantifierVars.values.map { it.variableRange!!.second - it.variableRange.first + 1 }.product()
+            repeat(numCombinations) {
+                yield(HashMap(values))
+                for ((key, value) in values) {
+                    val valRange = significantQuantifierVars[key]!!.variableRange!!
+                    if (value == valRange.second)
+                        values[key] = valRange.first
+                    else
+                    {
+                        values[key] = value + 1
+                        break
+                    }
+                }
+            }
+        }
+
+        private fun resolveSubProcessName(dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVarValues: HashMap<String, Int> = HashMap()): String {
+            val firstPart = dotExpr.parts[0]
+            val resolvedBase = firstPart.identifier +
+                if (dotExpr.parts[0].followedBy == FollowType.ARGUMENTS)
+                    "(${firstPart.argumentsOrIndices.joinToString(",") { argument ->
+                        (argument.first.toIntOrNull()
+                            ?: quantifierVarValues[argument.first]
+                            ?: constInts[argument.first]
+                            ?: throw UppaalErrorException(createUppaalError(
+                                UppaalPath(), rewriter.originalText, argument.second, "Cannot resolve integer value of argument: '${argument.first}'"
+                            )))
+                            .toString()
+                    }})"
+                else
+                    ""
+
+            val subTemplateParts = dotExpr.parts
+                .take(subTemRef.dotExprSubTemplatePathLength)
+                .drop(1)
+                .map { it.identifier }
+
+            return (listOf(resolvedBase) + subTemplateParts).joinToString(".")
+        }
+
+
+        /** If supplied the type "int[0,5]", output the range (0 .. 5). The lower and upper bounds may also be
+         * given by constant variables. **/
+        private fun getRangeFromBoundedIntType(type: String): Pair<Int, Int>? {
+            val range = if (type.startsWith("int") && type.contains('['))
+                type.substringAfter('[')
+                    .dropLast(1)
+                    .split(',')
+                    .map { it.trim() }
+                    .let { Pair(
+                        it[0].toIntOrNull() ?: constInts[it[0]] ?: return null,
+                        it[1].toIntOrNull() ?: constInts[it[1]] ?: return null
+                    ) }
+            else
+                null
+
+            if (range != null && range.second < range.first)
+                throw UppaalErrorException(createUppaalError(
+                    UppaalPath(), "Found bounded integer with impossible range: '$type' = int[${range.first}, ${range.second}]"
+                ))
+
+            return range
+        }
+
+        /** Given the name of a template or partial instantiation, find the bottom-most "root template". If a template
+         * name is given, that name is returned. If a partial instantiation name is given, the name of the template at
+         * the bottom of the possibly long chain of partial instantiations is returned. **/
+        private fun getRootTemplate(templateName: String): String? {
+            var rootName = templateName
+            var instantiationInfo = numSubTemplateUsers[rootName] ?: return null
+            while (instantiationInfo.baseTemplateName != null) {
+                rootName = instantiationInfo.baseTemplateName!!
+                instantiationInfo = numSubTemplateUsers[rootName]!!
+            }
+            return rootName
+        }
+
+
         override fun mapQueryError(error: UppaalError): UppaalError {
-            rewriter!!.backMapError(error)
+            rewriter.backMapError(error)
             return error
         }
     }

@@ -1,6 +1,5 @@
 package mapping.parsing
 
-@Suppress("MemberVisibilityCanBePrivate")
 class ConfreHelper {
     companion object {
         private fun expressionGenerator(withDotting: Boolean): String {
@@ -10,35 +9,30 @@ class ConfreHelper {
                 INT   = [0-9]+
                 BOOL  = true|false
             
-                Expression   :== [Unary] ('(' Expression ')' | ExtendedTerm $dotting) [(Binary|Assignment) Expression] .
-                ExtendedTerm :== Term [{Array} | '(' [Expression {',' Expression}] ')'] .
-                Term         :== IDENT | INT | BOOL .
-                Array        :== '[' [Expression] ']' .
+                Expression   :== [Unary] ('(' Expression ')' | ExtendedTerm $dotting | Quantifier) [(Binary|Assignment) Expression] .
+                ExtendedTerm :== Term [{Subscript} | '(' [Expression {',' Expression}] ')'] .
+                Term         :== IDENT | INT | BOOL | 'deadlock' .
+                Subscript    :== '[' [Expression] ']' .
                 
-                Unary        :== '+' | '-' | '!' | 'not' .
-                Binary       :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
-                               | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
-                Assignment   :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
-            """.trimIndent()
+                Quantifier :== ('forall' | 'exists' | 'sum') '(' IDENT ':' Type ')' Expression .
+                
+                Unary      :== '+' | '-' | '!' | 'not' .
+                Binary     :== '<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&'
+                             | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' .
+                Assignment :== '=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' .
+                
+                Type :== ['const'] IDENT ['[' [Expression] ',' [Expression] ']' | '(' [Type] {',' [Type]} ')'] .
+            """.trimIndent() // TODO: Support for structs in "Type"?
         }
 
         val queryExpressionGrammar = expressionGenerator(true)
         val baseExpressionGrammar = expressionGenerator(false)
 
-        // TODO: Support for structs?
-        val regularTypeAndExpressionGrammar = """
-            Type   :== ['const'] IDENT ['[' [Expression] ',' [Expression] ']' | '(' [Type] {',' [Type]} ')'] .
-            
-            $baseExpressionGrammar
-        """.trimIndent()
-
-
-
         val partialInstantiationConfre = Confre("""
             Instantiation :== IDENT ['(' [Params] ')'] '=' IDENT '(' [[Expression] {',' [Expression]}] ')' ';'.
-            Params :== [Type ['&'] IDENT {Array}] {',' [Type ['&'] IDENT {Array}]} .
+            Params :== [Type ['&'] IDENT {Subscript}] {',' [Type ['&'] IDENT {Subscript}]} .
             
-            $regularTypeAndExpressionGrammar
+            $baseExpressionGrammar
         """.trimIndent())
 
         val constIntConfre = Confre(

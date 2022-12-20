@@ -24,15 +24,15 @@ class PaChaMapper : Mapper {
 
         // TODO: Fix so that normal channel parameters of Templates are tracked for type-error-handing in partial instantiations
         private val chanDeclGrammar = Confre("""
-            ChanDecl :== IDENT TypeList ['&'] IDENT {Array} [';'] .
-            TypeList :== '(' [Type] {',' [Type]} ')' .
-            Type     :== ['&'] IDENT [TypeList] {Array} .
+            ChanDecl   :== IDENT TypeList ['&'] IDENT {Subscript} [';'] .
+            TypeList   :== '(' [SimpleType] {',' [SimpleType]} ')' .
+            SimpleType :== ['&'] IDENT [TypeList] {Subscript} .
             
             ${ConfreHelper.baseExpressionGrammar}
         """.trimIndent())
 
         private val chanUseGrammar = Confre("""
-            ChanUsage :== IDENT {Array} ['(' [['meta'] [Expression]] {',' [['meta'] [Expression]]} ')'] ('!' | '?') .
+            ChanUsage :== IDENT {Subscript} ['(' [['meta'] [Expression]] {',' [['meta'] [Expression]]} ')'] ('!' | '?') .
             
             ${ConfreHelper.baseExpressionGrammar}
         """.trimIndent())

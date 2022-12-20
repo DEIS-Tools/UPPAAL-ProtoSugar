@@ -70,17 +70,20 @@ class UppaalError {
 
 
 fun createUppaalError(path: UppaalPath, message: String, isUnrecoverable: Boolean = false): UppaalError
-    = createUppaalError(path, "", IntRange.EMPTY, message, isUnrecoverable)
+    = createUppaalError(path, "", IntRange.EMPTY, message, "", isUnrecoverable)
 
 fun createUppaalError(path: UppaalPath, code: String, message: String, isUnrecoverable: Boolean = false): UppaalError
-    = createUppaalError(path, code, code.indices, message, isUnrecoverable)
+    = createUppaalError(path, code, code.indices, message, "", isUnrecoverable)
 
 fun createUppaalError(path: UppaalPath, code: String, node: ParseTree, message: String, isUnrecoverable: Boolean = false): UppaalError
-    = createUppaalError(path, code, node.range(), message, isUnrecoverable)
+    = createUppaalError(path, code, node.range(), message, "", isUnrecoverable)
 
-fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalError {
+fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalError
+    = createUppaalError(path, code, range, message, "", isUnrecoverable)
+
+fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, context: String, isUnrecoverable: Boolean = false): UppaalError {
     val linesAndColumns =
         if (range != IntRange.EMPTY) LineColumnRange.fromIntRange(code, range)
         else LineColumnRange(1,1,1,1)
-    return UppaalError(path, linesAndColumns, message, "", isUnrecoverable = isUnrecoverable)
+    return UppaalError(path, linesAndColumns, message, context, isUnrecoverable = isUnrecoverable)
 }

@@ -28,8 +28,8 @@ class TxQuanMapper : Mapper {
         )
 
         private val queryGrammar = Confre("""
-            Query :== [Quantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .
-            Quantifier :== ('A[]' | '$aBox')
+            Query :== [QueryQuantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .
+            QueryQuantifier :== ('A[]' | '$aBox')
                          | ('E<>' | '$eDiamond')
                          | ('A<>' | '$aDiamond')
                          | 'E[]'
