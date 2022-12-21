@@ -142,7 +142,8 @@ class PaChaMapper : Mapper {
 
                     for (pair in typeNodes.map { it.children[0] as Node }.withIndex()) {
                         val typeName = pair.value.children[1]!!.toString()
-                        val array = pair.value.children[3]!!.toString().replace(" ", "")
+                        val array = if (pair.value.children[3]!!.isNotBlank()) originalCode.substring(pair.value.children[3]!!.range())
+                                    else ""
 
                         // Add the parameter variable declaration
                         val parameterVariableDecl =
@@ -261,7 +262,7 @@ class PaChaMapper : Mapper {
                         .overrideErrorPath { Pair(syncPath.toString(), syncRewriter) }
                         .overrideErrorRange { arguments[insertOp.index]!!.second }
                 }
-                if (updateRewriter.originalText.isNotBlank())
+                if (insertList.isNotEmpty() && updateRewriter.originalText.isNotBlank())
                     updateRewriter.insert(0, ",\n")
             }
             else { // Otherwise, it's a "Listen"
@@ -282,7 +283,8 @@ class PaChaMapper : Mapper {
 
                 // Replace meta-variables with global parameter-variables.
                 if (updateRewriter.originalText.isNotBlank()) {
-                    updateRewriter.insert(0, ",\n")
+                    if (insertList.isNotEmpty())
+                        updateRewriter.insert(0, ",\n")
                     val updateTree = ConfreHelper.expressionAssignmentListConfre.matchExact(updateRewriter.originalText)
                         ?: return errors + createUppaalError(
                             updatePath, updateRewriter.originalText, updateRewriter.originalText.indices, "PaCha mapper could not parse this update label", true

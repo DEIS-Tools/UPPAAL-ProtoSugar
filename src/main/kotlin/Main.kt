@@ -209,6 +209,7 @@ private fun runServer(server: String)
                     }
                 }
                 catch (ex: Exception) {
+                    writeException(ex)
                     handleServerModeException(toGuiOutput, "GUI query input lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = false)
                 }
                 finally {

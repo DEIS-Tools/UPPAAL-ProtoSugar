@@ -117,7 +117,7 @@ class MapperEngine(private val mappers: List<Mapper>) {
     fun mapQueryError(error: UppaalError): UppaalError {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = queryPhases?.reversed() ?: throw Exception("You must upload a model before you run a query")
-        return reversePhases.fold(error) { inner_error, phase -> phase.mapQueryError(inner_error) }
+        return reversePhases.fold(error) { innerError, phase -> phase.mapQueryError(innerError) }
     }
 
 

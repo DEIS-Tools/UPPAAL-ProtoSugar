@@ -20,11 +20,11 @@ test {
 }
 
 compileKotlin {
-    kotlinOptions.jvmTarget = '18'
+    kotlinOptions.jvmTarget = '11'
 }
 
 compileTestKotlin {
-    kotlinOptions.jvmTarget = '18'
+    kotlinOptions.jvmTarget = '11'
 }
 
 application {

@@ -1088,8 +1088,7 @@ class SeCompMapper : Mapper {
         private fun getIndices(subscriptListNode: Node): List<Pair<String, IntRange>>
             = subscriptListNode.children.filterNotNull()
                 .map { subscript ->
-                    val expression = subscript.asNode().children[1]!!
-                    val range = expression.range()
+                    val range = subscript.asNode().range()
                     val value = rewriter.originalText.substring(range)
                     Pair(value, range)
                 }
