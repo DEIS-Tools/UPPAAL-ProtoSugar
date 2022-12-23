@@ -1,11 +1,11 @@
 package mapping.mappers
 
-import mapping.base.*
 import mapping.parsing.Confre
 import mapping.parsing.ConfreHelper
 import mapping.parsing.Leaf
 import mapping.parsing.ParseTree
 import mapping.rewriting.Rewriter
+import uppaal.error.UppaalError
 
 class TxQuanMapper : Mapper {
     override fun getPhases()

@@ -1,4 +1,4 @@
-package uppaal_pojo
+package uppaal.model
 
 import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text

@@ -3,8 +3,8 @@ plugins {
     id 'application'
 }
 
-group = 'org.example'
-version = '1.0-SNAPSHOT'
+group = 'org.uppaal.protosugar'
+version = '1.0.0'
 
 repositories {
     mavenCentral()

@@ -1,6 +1,8 @@
-package mapping.base
+package mapping.mappers
 
-import uppaal_pojo.*
+import uppaal.error.UppaalError
+import uppaal.error.UppaalPath
+import uppaal.model.UppaalPojo
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
 
@@ -39,7 +41,7 @@ abstract class ModelPhase {
                 (node, filter) -> filter.isInstance(node.element)
             }
 
-    /** Errors from the UPPAAL engine or later phases must be "mapped back" to the original text on which they belong.
+    /** Errors from the UPPAAL engine or mapper phases must be "mapped back" to the original text on which they belong.
      * Since this framework makes many rewrites to the input code, equally many "back-maps" are required to compensate.
      * It is recommended to use the "Rewriter" to perform all text-mutation and back-mapping. **/
     abstract fun mapModelErrors(errors: List<UppaalError>): List<UppaalError>

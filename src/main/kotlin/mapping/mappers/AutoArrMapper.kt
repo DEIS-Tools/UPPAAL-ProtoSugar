@@ -1,13 +1,17 @@
 package mapping.mappers
 
 import createOrGetRewriter
-import mapping.base.*
-import mapping.parsing.*
 import mapping.rewriting.ActivationRule
 import mapping.rewriting.BackMapResult
 import mapping.rewriting.Rewriter
-import uppaal_pojo.Declaration
-import uppaal_pojo.System
+import mapping.parsing.Confre
+import mapping.parsing.ConfreHelper
+import mapping.parsing.Node
+import uppaal.error.UppaalError
+import uppaal.error.UppaalPath
+import uppaal.error.createUppaalError
+import uppaal.model.Declaration
+import uppaal.model.System
 
 class AutoArrMapper : Mapper {
     override fun getPhases()
@@ -117,28 +121,38 @@ class AutoArrMapper : Mapper {
         private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String>, path: UppaalPath, code: String, autoArr: Node): Collection<UppaalError> {
             val errors = ArrayList<UppaalError>()
             if (dimSizes.isEmpty())
-                errors.add(createUppaalError(
+                errors.add(
+                    createUppaalError(
                     path, code, autoArr.children[1]!!, "AutoArr-syntax requires at least one array dimension on variable '${autoArr.children[1]!!}'.", true
-                ))
+                )
+                )
             else if (dimVars.size != dimSizes.size)
-                errors.add(createUppaalError(
+                errors.add(
+                    createUppaalError(
                     path, code, autoArr.children[1]!!, "Array '${autoArr.children[1]!!}' must have an equal number of dimensions and dimension variables.", true
-                ))
+                )
+                )
 
             for (size in dimSizes.withIndex())
                 if (size.value == null)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, code, autoArr.children[2]!!, "Cannot determine size of array dimension ${size.index+1} of ${dimSizes.size} in array '${autoArr.children[1]!!}'.", true
-                    ))
+                    )
+                    )
                 else if (size.value!! <= 0)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, code, autoArr.children[2]!!, "Array dimension ${size.index+1} of ${dimSizes.size} in array '${autoArr.children[1]!!}' has non-positive size.", true
-                    ))
+                    )
+                    )
 
             if (dimVars.distinct().size != dimVars.size)
-                errors.add(createUppaalError(
+                errors.add(
+                    createUppaalError(
                     path, code, autoArr.children[5]!!, "Array '${autoArr.children[1]!!}' has duplicate dimension variable names.", true
-                ))
+                )
+                )
 
             return errors
         }

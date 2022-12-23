@@ -1,4 +1,4 @@
-import mapping.base.UppaalPath
+import uppaal.error.UppaalPath
 import mapping.rewriting.InsertOp
 import mapping.rewriting.Rewriter
 

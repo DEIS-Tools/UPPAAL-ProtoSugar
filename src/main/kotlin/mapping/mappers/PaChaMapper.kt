@@ -2,13 +2,14 @@ package mapping.mappers
 
 import createOrGetRewriter
 import joinInsert
-import mapping.base.*
 import mapping.parsing.*
 import mapping.rewriting.ActivationRule
 import mapping.rewriting.BackMapResult
 import mapping.rewriting.Rewriter
-import uppaal_pojo.*
-import uppaal_pojo.Declaration
+import uppaal.error.UppaalError
+import uppaal.error.UppaalPath
+import uppaal.error.createUppaalError
+import uppaal.model.*
 
 
 data class PaChaInfo(val numParameters: Int, val numDimensions: Int, val parameterIndex: Int?)
@@ -178,9 +179,11 @@ class PaChaMapper : Mapper {
                 scope[chanName] = PaChaInfo(numTypes, numDimensions, parameterIndex)
 
                 if (inParameterList && parameterIndex == null)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, originalCode, parameterListRange, "Syntax error in parameters wrt. blocks: '()', '[]', and '{}'", true
-                    ))
+                    )
+                    )
             }
 
             return errors

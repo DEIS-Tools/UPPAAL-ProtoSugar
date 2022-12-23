@@ -1,3 +1,3 @@
-package uppaal_pojo
+package uppaal.model
 
 interface UppaalPojo

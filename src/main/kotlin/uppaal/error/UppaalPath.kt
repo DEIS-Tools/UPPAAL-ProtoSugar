@@ -1,7 +1,7 @@
-package mapping.base
+package uppaal.error
 
-import uppaal_pojo.*
-import uppaal_pojo.System
+import uppaal.model.*
+import uppaal.model.System
 
 class UppaalPath private constructor(path: List<PathNode>): ArrayList<PathNode>(path) {
     constructor() : this(listOf())

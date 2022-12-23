@@ -1,8 +1,10 @@
-import mapping.*
-import mapping.base.*
 import mapping.mappers.*
 import mapping.parsing.Confre
 import mapping.parsing.Node
+import mapping.Orchestrator
+import uppaal.error.UppaalError
+import uppaal.error.UppaalPath
+import uppaal.error.createUppaalError
 import java.io.*
 import java.lang.ProcessBuilder.Redirect
 import java.nio.charset.StandardCharsets
@@ -27,7 +29,7 @@ private val availableMappers = mapOf(
     //Pair("ChRef", null),
     //Pair("Hiera", null)
 )
-private lateinit var engine: MapperEngine
+private lateinit var orchestrator: Orchestrator
 
 private val errorListConfre = Confre("""
             INT = ([1-9][0-9]*)|0*
@@ -64,7 +66,7 @@ private const val modelSuccessResponsePrefix = "{\"res\":\"ok\",\"info\":{\"warn
 fun main(args: Array<String>)
 {
     val tags = getTags(args)
-    engine = MapperEngine(tags[MAPPERS_TAG]?.map { availableMappers[it]!! } ?: listOf())
+    orchestrator = Orchestrator(tags[MAPPERS_TAG]?.map { availableMappers[it]!! } ?: listOf())
 
     when {
         tags.containsKey(FILE_TAG) -> runOnFile(File(tags[FILE_TAG]!![0]), tags[OUTPUT_TAG]?.let { File(it[0]) })
@@ -120,7 +122,7 @@ private fun getParams(argItr: Iterator<String>, count: Int): List<String>
 
 private fun runOnFile(inputFile: File, outputFile: File?)
 {
-    val modelResult = engine.mapModel(inputFile.inputStream())
+    val modelResult = orchestrator.mapModel(inputFile.inputStream())
     if (modelResult.second.isNotEmpty()) {
         print("There were errors:\n")
         print(modelResult.second.joinToString("\n"))
@@ -177,7 +179,7 @@ private fun runServer(server: String)
                     latestModelErrors = null
                     val modelResult = interceptModelCmd(toEngineInput)
                     if (modelResult.second.any { it.isUnrecoverable }) {
-                        val mappedErrors = engine.mapModelErrors(listOf(), modelResult.second)
+                        val mappedErrors = orchestrator.mapModelErrors(listOf(), modelResult.second)
                         toGuiOutput.write(generateModelErrorResponse(mappedErrors))
                         toGuiOutput.flush()
                     }
@@ -188,7 +190,7 @@ private fun runServer(server: String)
                     }
                 }
                 catch (ex: Exception) {
-                    engine.clearCache()
+                    orchestrator.clearCache()
                     writeException(ex)
                     handleServerModeException(toGuiOutput, "GUI model input lead to exception. See details: '${Path(CRASH_DETAILS_FILE_PATH).absolutePathString()}'", useModelErrorResponse = true)
                 }
@@ -271,7 +273,7 @@ private fun runServer(server: String)
                     }
                     else {
                         interceptModelSuccessResponse(toGuiInput, true) // Yes. Ignore output
-                        val mappedErrors = engine.mapModelErrors(listOf(), latestModelErrors)
+                        val mappedErrors = orchestrator.mapModelErrors(listOf(), latestModelErrors)
                         toGuiOutput.write(generateModelErrorResponse(mappedErrors))
                     }
                     toGuiOutput.flush()
@@ -315,7 +317,7 @@ private fun interceptModelCmd(input: BufferedReader): Pair<String, List<UppaalEr
     while (!originalModel.endsWith("\"}") || originalModel.endsWith("\\\"}"))
         originalModel.append(input.read().toChar())
 
-    return engine.mapModel(
+    return orchestrator.mapModel(
         originalModel.toString().removeSuffix("\"}").unJsonFy()
     )
 }
@@ -341,7 +343,7 @@ private fun interceptModelErrorResponse(input: BufferedReader, mapperErrors: Lis
             )
 
     val engineErrors = errorJsonList.map { UppaalError.fromJson(it) }
-    return engine.mapModelErrors(engineErrors, mapperErrors)
+    return orchestrator.mapModelErrors(engineErrors, mapperErrors)
 }
 private fun generateModelErrorResponse(errors: List<UppaalError>): String
     = "{\"res\":\"error\",\"info\":{\"errors\":[${errors.joinToString(",")}],\"warnings\":[]}}"
@@ -364,7 +366,7 @@ private fun interceptModelSuccessResponse(input: BufferedReader, suppressMapping
             it.children[2]!!.asLeaf().token!!.value.drop(1).dropLast(1),
             it.children[5]!!.asLeaf().token!!.value.drop(1).dropLast(1)
         ) }
-        engine.mapProcesses(namesAndTemplates)
+        orchestrator.mapProcesses(namesAndTemplates)
 
         var offset = 0
         for (processNode in processNodes.withIndex()) {
@@ -388,7 +390,7 @@ private fun interceptQueryCmd(input: BufferedReader): Pair<String, UppaalError?>
         query.append(input.read().toChar())
 
     val queryString = query.toString().removeSuffix("\"}").unJsonFy()
-    val result = engine.mapQuery(queryString)
+    val result = orchestrator.mapQuery(queryString)
     return Pair(result.first.jsonFy(), result.second)
 }
 private fun generateQueryCommand(query: String): String
@@ -404,7 +406,7 @@ private fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
     while (!throwaway.endsWith("}}"))
         throwaway.append(input.read().toChar())
 
-    return engine.mapQueryError(UppaalError.fromJson(error.toString()))
+    return orchestrator.mapQueryError(UppaalError.fromJson(error.toString()))
 }
 private fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"

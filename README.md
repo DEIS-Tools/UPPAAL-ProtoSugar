@@ -79,7 +79,7 @@ In the following, "_native [...]_" will refer to how the syntax or semantics in 
 
 The sections below are structured as "`CodeName` – Full Name". As mentioned in Section "1.2 Installation and configuration", the `CodeName` is used to activate the mapper when launching ProtoSugar.
 
-### 2.1 `TxQuan` – **T**e**x**tual Query **Quan**tifiers
+### 2.1 `TxQuan` – Textual Query Quantifiers
 This mapper adds textual alternatives to the native query quantifiers as described in the table further below (where `p` and `q` are boolean expressions). 
 
 **Rationale:** The textual query quantifiers are (hopefully) easier to explain to, and understand for, new UPPAAL users. This could help them better understand how queries work and have an easier time getting started with UPPAAL.
@@ -102,7 +102,7 @@ The mapper adds an alternative to "`E[] (not p)`", and not "`E[] p`", due to the
 - `Device1.Sending LEADSTO Device2.Receiving`
 
 
-### 2.2 `AutoArr` – **Auto** **Arr**ays
+### 2.2 `AutoArr` – Auto Arrays
 This mapper adds a new syntax for instantiating arrays (of type `int` or `bool`) based on a "lambda expression" that takes the index of all array dimensions as input.
 
 **Rationale:** Apart from making it possible to auto-generate different values for each array position, this also makes it easier to initialize huge arrays since the user does not need to enter every value for every position.
@@ -133,7 +133,7 @@ Otherwise, there should be full support/integration for all other language featu
 - `int cube[10][10][10] = { i, j, k -> func(i, j, k) }`
 
 
-### 2.3 `PaCha` – **Pa**rameterized **Cha**nnels
+### 2.3 `PaCha` – Parameterized Channels
 This mapper adds parameterization and value-passing to channels and synchronizations. It expands the native `chan`-type syntax with an optional "type list" (see "2.3.1 Syntax and Semantics") that states how many values, and of what type, said channel will pass from the emitter to the receiver when two processes synchronize.
 
 **Rationale:** It is not unusual for processes to exchange data, but there is no native value-passing feature in UPPAAL. A typical solution is to declare some global state that the processes can use to interact, but this clutters the global state-space and "moves data out of" processes. Thus, this mapper emulates direct value-passing between processes which allows the emitter and receiver to seamlessly exchange local data when synchronizing. This also removes clutter from the global state-space. (See Section "2.3.3 Examples" for the Gossip Example with and without parameterized channels.)
@@ -175,25 +175,148 @@ This section presents two versions of the "gossiping girls" algorithm that are m
 | ![](img/PaCha/Gossip%20OneWay%20shorthand.png) |
 | Secrets and merge-logic are moved into the template. The channel `send` no longer needs to be an array which also removes the "select" clause on the "Pending -> Answering transition. Also, the text/code on the edges in the template is more compact/concise and merge-logic is only executed on receiver-edges, where it makes the most sense. |
 
-### 2.4 `SeComp` – **Se**quential **Comp**osition
-This mapper adds 
+### 2.4 `SeComp` – Sequential Composition
+This mapper adds support for "embedding templates into other templates". 
+
+**Rationale:** 
 
 #### 2.4.1 Syntax and Semantics
+
+`__SubTem`
+
+`::SubTem sub::`
+
+`Template.sub.Location`
 
 
 #### 2.4.2 Limitations
 - Sub-templates cannot have parameters.
-- Templates that use sub-templates cannot have free scalar parameters.
+- Templates (and partial instantiations) that use sub-templates cannot be freely instantiated (i.e. directly mentioned on the "system"-line) when they have free scalar parameters.
 
+#### 2.4.3 Planned features
+- Parametrization
 
-#### 2.4.3 Examples
+#### 2.4.4 Examples
+
 
 
 ## 3. Architecture and extensibility
-Kotlin
-
-### How is ProtoSugar structured
+ProtoSugar is a command line program written in Kotlin and built using Gradle (all through JetBrains IntelliJ). In the following Section "3.1 Structure of ProtoSugar" explains how the code of ProtoSugar is structured. Section "3.2 Dataflow through ProtoSugar" explains which data ProtoSugar intercepts and where/how it is mapped. Section "3.3 Implementing a mapper" explains how to compile the source code and how to implement a new mapper.
 
 
-### How to make a new mapper
+### 3.1 Structure of ProtoSugar
+The code is structured into three general parts: "`main`", "`uppaal`", and "`mapping`".
 
+1. "`main`": Consisting of just the `Main.kt`-file, this is where the enabled mappers are configured and where the program is set up to either map a single model-file or act as a UPPAAL engine to integrate with the GUI.
+2. "`uppaal`": This package contains model-classes to represent "UPPAAL errors" and "UPPAAL models". These are used for parsing inputs and producing (mapped) outputs.
+3. "`mapping`": This package contains the various different mappers, as well as facilities for parsing and rewriting/mapping the textual parts of UPPAAL models.
+
+#### 3.1.1 Main-part
+The main function first parses the command line input to determine which "mode" it should run in, and which mappers should be enabled. The available modes are "file", "server", and "debug", however, debug has not been used in a long time and was mostly used to understand the data flow, so it will not be covered in depth here.
+
+In file-mode, the mapper simply maps the input-model and outputs the result (be that errors or a successful mapping) to the standard output.
+
+In server-mode, ProtoSugar runs the UPPAAL server on the provided path and sets up four data streams: "`GUI -> ProtoSugar`", "`ProtoSugar -> Engine`", "`Engine -> ProtoSugar`", and "`ProtoSugar -> GUI`". The code can thus inspect all data going between the GUI and engine, and if the data is a parse-model-command, a run-query-command, or a response to either of these, the data is intercepted and possibly mapped. Section 3.2 describes this dataflow in more detail.
+
+#### 3.1.2 Uppaal-part
+The `uppaal`-part is split into the `model` and `error` sub-parts.
+
+The `model`-part contains classes for storing (and outputting) the tree structure and data of a UPPAAL model. The `Simple XML` Kotlin library is used to parse the UPPAAL model file (XML format) into objects of these classes. All of these classes implement the marker-interface `UppaalPojo`, which simply allows the code to generalize all UPPAAL model objects (see for example below).
+
+The `error`-part contains classes for storing (and outputting) UPPAAL error data, two of which are the `UppaalPath` and `LineColumnRange` classes. The `UppaalPath` class is just a list of `UppaalPojo` objects that represents a path to some object in the loaded UPPAAL model. Since UPPAAL bases "text-ranges" on start/end lines/columns (and not character position), the `LineColumnRange` class is implemented to store this data and also to map between line/column-ranges and character-ranges.
+
+#### 3.1.3 Mapping-part
+The `part` part contains the `Orchestrator`, as well as the `mappers`, `parsing`, and `rewriting` sub-parts.
+
+The `Orchestrator` and the `mapper`-part are closely related. Each mapper implements zero or more "model phases", zero or one "simulation phases", and zero or one "query phases". If implemented, each of these phase-types lets a mapper modify certain data going between the GUI and engine. Multiple model phases are supported in case multiple "runs" through the model is required to properly index/validate/map the input. See also the `Mapper`-interface which all mappers must implement. Next, the `Orchestrator` is responsible for passing models and queries through the enabled mappers' phases before sending this to the engine. It also passes responses back through the relevant phases before going to the GUI. Section 3.2 describes this dataflow in more detail.
+
+The `parsing`-part contains the "`Confre`" and related helpers. The `Confre`-class is like the `Regex`-class, but for context-free grammars instead. The `Confre` takes a string with a context-free grammar as its constructor input, and is afterwards capable of parsing text that matches the grammar into a "parse tree" (see also the `ParseTree`, `Node`, and `Leaf` classes). The confre supports the operations: "match exact", "find", and "find all". The `Confre` was made since regexes usually aren't strong enough to properly describe all UPPAAL syntax and since maintaining regexes for patterns as complex as what these mappers are supposed to map is nearly impossible. Section 3.3 describes how to use the `Confre` in more detail.
+
+The `rewriting`-part contains the `Rewriter`-class and its related `BackMap`-classes. Practically all mappers need to rewrite some original input text either by "inserting", "replacing", or "appending" new text. Thus, the `Rewriter` provides this functionality. Furthermore, since the mappers (and their phases) are run sequentially, many "layers of transformation" may be applied to the original model. The `Rewriter` thus also has a "back-mapping" system for UPPAAL errors, such that errors generated on the mapped model/query can be "moved back onto" their correct spot in the original input text. Section 3.3 describes how to use the `Rewriter` in more detail.
+
+
+### 3.2 Dataflow through ProtoSugar
+As mentioned in Section 3.1.3, a "mapper" is split into three phases – the "model", "simulation", and "query" phase – which may or may not be implemented depending on the mapper. 
+
+- The model phase can map "a model going to the engine" and back-map "the model errors going back to the GUI".
+- The simulator phase can map "the name of processes going back to the GUI" (which the engine outputs when successfully parsing a model).
+- The query phase is similar to the model phase and can map "a query going to the engine" and back-map "the query error going back to the GUI".
+
+Stated a bit more algorithmically, ProtoSugar's main loop monitors the data going between the GUI and engine and will intercept/redirect the following kinds of data:
+
+- `GUI->Engine`: An "upload model request" is redirected through the "model phase(s)".
+- `Engine->GUI`: A "model error response" is redirected **backwards** through the "model phase(s)".
+- `Engine->GUI`: A "model success response" is redirected **backwards** through the "simulator phase(s)".
+- `GUI->Engine`: A "run query request" is redirected through the "query phase(s)".
+- `Engine->GUI`: A "query error response" is redirected **backwards** through the "query phase(s)".
+
+The dataflow is roughly split into the "model flow" and "query flow". These are described in more detail below.
+
+**Model flow:** In the pseudocode below, an error is "unrecoverable" if it is so severe that the mapper cannot produce a sensible output, in which case ProtoSugar simply outputs the currently known errors back to the GUI.
+
+```text
+function InterceptModel(model: String)
+    mappedModel = model
+    errors = []
+    for (mapper in enabledMappers)
+        for (modelPhase in mapper.modelPhases)
+            (mappedModel, newErrors) = modelPhase.map(mappedModel)
+            errors += newErrors
+            if (newErrors.anyIsUnrecoverable)
+                return BackMapErrors(errors)
+            
+    result = sendModelToUppaalEngine(mappedModel)
+    if (result is errorResponse)
+        return BackMapErrors(errors + result)
+    else if (errors.isNotEmpty)
+        return BackMapErrors(errors)
+    else
+        for (mapper in enabledMappers.reversed)
+            if (mapper.simulatorPhase != null)
+                result = mapper.simulatorPhase.map(result)
+        return result
+    
+function BackMapErrors(errors: UppaalError)
+    for (mapper in enabledMappers.reversed)
+        for (modelPhase in mapper.modelPhases.reversed)
+            errors = modelPhase.backMap(errors)
+    return errors
+```
+
+**Query flow:**
+```text
+function InterceptQuery(query: String)
+    mappedQuery = query
+    for (mapper in enabledMappers)
+        if (mapper.queryPhase != null)
+            mappedQuery = mapper.queryPhase.map(mappedQuery)
+            if (mappedQuery is error)
+                return BackMapError(mappedQuery as error)
+            
+    result = sendQueryToUppaalEngine(mappedQuery)
+    if (result is error)
+        return BackMapError(result as error)
+    else
+        return result
+    
+function BackMapError(error: UppaalError)
+    for (mapper in enabledMappers.reversed)
+        if (mapper.queryPhase != null)
+            error = mapper.queryPhase.backMap(errors)
+    return errors
+```
+
+#### 3.2.1 Notes on error back-mapping
+This is not stated in the pseudocode above, but when back-mapping an error, only the phases that were run **before** the creation of the error will actually back-map said error, since the error will not be affected or moved around by the phase that created it, nor any later phases. I.e. an error created by the very first phase requires no back-mapping, whereas any error originating from the UPPAAL engine itself will require back-mapping from all enabled phases.
+
+
+### 3.3 Implementing a mapper
+
+#### Using the Confre
+
+#### Using the Rewriter
+
+
+
+## 4 Additional comments
+As of writing, do not create free reference parameters in a template and instantiate said template freely. This causes the start/end columns of the resulting "invalid free parameter type" error to start and end on column "2147463674" (or similar), which crashes ProtoSugar due to "index out of bounds"-related errors.

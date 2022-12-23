@@ -1,4 +1,4 @@
-package mapping.base
+package uppaal.error
 
 import mapping.parsing.Confre
 import mapping.parsing.Node

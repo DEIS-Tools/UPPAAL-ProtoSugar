@@ -1,10 +1,13 @@
-package uppaal_pojo
+package uppaal.model
 
 import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Root
 
-@Root(name = "nail")
-class Nail : UppaalPojo {
+@Root(name = "branchpoint")
+class Branchpoint : UppaalPojo {
+    @field:Attribute(name = "id")
+    lateinit var id: String
+
     @field:Attribute(name = "x")
     var x: Int = 0
 

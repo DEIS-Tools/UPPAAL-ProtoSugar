@@ -1,17 +1,19 @@
 package mapping
 
-import mapping.base.*
+import mapping.mappers.*
+import uppaal.error.UppaalError
+import uppaal.error.UppaalPath
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
-import uppaal_pojo.Nta
-import uppaal_pojo.Template
-import uppaal_pojo.Transition
+import uppaal.model.Nta
+import uppaal.model.Template
+import uppaal.model.Transition
 import java.io.InputStream
 import java.io.StringWriter
 import java.lang.Exception
 
 // Elements in the "XML-tree" are visited in pre-order.
-class MapperEngine(private val mappers: List<Mapper>) {
+class Orchestrator(private val mappers: List<Mapper>) {
     private val serializer: Serializer = Persister()
 
     private var modelPhases: ArrayList<ModelPhase>? = null

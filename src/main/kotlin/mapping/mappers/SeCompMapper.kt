@@ -2,15 +2,19 @@ package mapping.mappers
 
 import ensureStartsWith
 import mapping.*
-import mapping.base.*
+import uppaal.error.*
 import mapping.rewriting.BackMapResult
 import mapping.rewriting.Rewriter
 import createOrGetRewriter
 import mapping.parsing.*
 import mapping.rewriting.ActivationRule
+import uppaal.error.UppaalError
+import uppaal.error.UppaalErrorException
+import uppaal.error.UppaalPath
+import uppaal.error.createUppaalError
+import uppaal.model.*
 import offset
 import product
-import uppaal_pojo.*
 import java.util.Stack
 
 
@@ -103,9 +107,11 @@ class SeCompMapper : Mapper {
         /** Register a template as a "sub-template" and/or "sub-template USER". Note all information about which and
          * how many sub-templates are used and check if sub-templates are structured correctly. **/
         private fun indexTemplate(path: UppaalPath, template: Template): List<UppaalError> {
-            val temName = template.name.content ?: return listOf(createUppaalError(
+            val temName = template.name.content ?: return listOf(
+                createUppaalError(
                 path, "Template has no name.", true
-            ))
+            )
+            )
             val errors = ArrayList<UppaalError>()
 
             // Register as sub-template
@@ -118,20 +124,26 @@ class SeCompMapper : Mapper {
                     .map { loc -> LocationSummary(loc.id, loc.name?.content) }
 
                 if (exitLocations.isEmpty())
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, "A sub-template must have at least one exit location (location with no outgoing transitions)."
-                    ))
+                    )
+                    )
 
                 if (template.transitions.none { it.source.ref == entryLocation?.id })
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, "The entry state of a sub-template must have at least one outgoing transition."
-                    ))
+                    )
+                    )
 
                 // TODO: Relax this constraint later
                 if (template.parameter != null && template.parameter!!.content.isNotBlank())
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, template.parameter!!.content, template.parameter!!.content.indices, "Sub-templates currently do not support parameters."
-                    ))
+                    )
+                    )
 
                 subTemplates[temName] = SubTemplateInfo(entryLocation, exitLocations, temName, isFaulty = template.init?.ref == null || errors.isNotEmpty())
             }
@@ -155,22 +167,28 @@ class SeCompMapper : Mapper {
                 // Determine if sub-template inclusion is well-formed
                 val locPath = path.plus(locAndIndex)
                 if (nameAndInstance.size !in 1..2) {
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         locPath.plus(locAndIndex.value.name!!), locNameContent, "To insert a sub-template, format the location's name as: \"::[sub-template name] [instantiated name]::\" or \"::[sub-template name]::\"."
-                    ))
+                    )
+                    )
                     continue
                 }
 
                 // Determine if location is valid sub-tem insertion point
                 val locId = locAndIndex.value.id
                 if (template.init?.ref == locId)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         locPath, "An initial/entry location cannot be a sub-template instance."
-                    ))
+                    )
+                    )
                 if (template.transitions.none { it.target.ref == locId } && subTemplates.containsKey(locNameContent))
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         locPath, "An exit location cannot be a sub-template instance."
-                    ))
+                    )
+                    )
                 if (errors.isNotEmpty())
                     continue
 
@@ -222,9 +240,11 @@ class SeCompMapper : Mapper {
             for (tree in ConfreHelper.partialInstantiationConfre.findAll(system.content).map { it as Node }) {
                 val baseName = tree.children[3]!!.toString()
                 if (subTemplates.containsKey(baseName))
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, system.content, tree.children[3]!!.range(), "Sub-templates cannot be instantiated by user-code.", true
-                    ))
+                    )
+                    )
                 else if (numSubTemplateUsers.containsKey(baseName)) {
                     val parameterValueRanges =
                         if (tree.children[1]?.isNotBlank() == true) {
@@ -248,9 +268,11 @@ class SeCompMapper : Mapper {
                 )
                 // Loop does not handle "cannot determine total number of instances" since UPPAAL will notify about this by itself.
                 for (subTemplateIdentNode in identNodes.filter { subTemplates.containsKey(it.toString()) })
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         path, system.content, subTemplateIdentNode, "Sub-templates cannot be instantiated by user-code.", true
-                    ))
+                    )
+                    )
                 systemLine.putAll(identNodes.map { Pair(it.toString(), it.range()) }.filter { numSubTemplateUsers.containsKey(it.first) })
             }
 
@@ -283,9 +305,11 @@ class SeCompMapper : Mapper {
                         parameterRanges.add(FreeParameter(range.first, range.second, name))
                 }
                 else if (type.startsWith("scalar") || (freeTypedefs.containsKey(type) && freeTypedefs[type] == null)) { // 'null' in freeTypedefs means 'is scalar'
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         parameterPath, fullText, parameterIndices, "Users of sub-templates cannot have scalar parameters."
-                    ))
+                    )
+                    )
                     parameterRanges.add(null)
                 }
                 else
@@ -387,9 +411,11 @@ class SeCompMapper : Mapper {
                 if (usage.subTemplateName !in subTemplates.keys) {
                     val faultyLocationWithIndex = template.locations.withIndex().find { it.value.id == usage.insertLocationId }!!
                     val locationPath = path.plus(faultyLocationWithIndex)
-                    errors.add(createUppaalError(
+                    errors.add(
+                        createUppaalError(
                         locationPath, usage.originalLocationText, usage.originalLocationText.indices, "The template name '${usage.subTemplateName}' either does not exist or is not a sub-template.", true
-                    ))
+                    )
+                    )
                 }
 
             return errors + checkCircularUse(path, listOf(templateName))
@@ -400,9 +426,11 @@ class SeCompMapper : Mapper {
         private fun checkCircularUse(path: UppaalPath, branch: List<String>): List<UppaalError> {
             if (branch.size != branch.distinct().size)
                 return if (branch.last() == branch.first()) // If cycle pertains to root template
-                    listOf(createUppaalError(
+                    listOf(
+                        createUppaalError(
                         path, "Cyclic sub-template usage: ${branch.joinToString(" -> ") { "'${it}'" }}.", true
-                    ))
+                    )
+                    )
                 else
                     listOf() // If cycle does not pertain to root template, wait for that template's check to come
 
@@ -1043,9 +1071,11 @@ class SeCompMapper : Mapper {
             val terms = listOf(node.children[0]!!.asNode()).plus( // Take the "root" terms in the dot expression
                 node.children[1]!!.asNode().children.map {
                     it!!.asNode().children[1]!!.asNode().children.first() as Node? // Take all (nullable) terms in the following "{'.' [ExtendedTerm]}"
-                        ?: throw UppaalErrorException(createUppaalError(
+                        ?: throw UppaalErrorException(
+                            createUppaalError(
                             UppaalPath(), rewriter.originalText, node.range(), "Blank term in dot-expression '${rewriter.originalText.substring(node.range())}'", ""
-                        ))
+                        )
+                        )
                 })
 
             val parts = terms.map { partNode ->
@@ -1210,9 +1240,11 @@ class SeCompMapper : Mapper {
             // If the dotExpr references the/an exit location of the sub-template
             if (subProcessInfo.subTemplateInfo.exitLocations.any { loc -> loc.name == lastPart.identifier }) {
                 if (subProcessInfo.subTemplateInfo.exitLocations.size != 1)
-                    throw UppaalErrorException(createUppaalError(
+                    throw UppaalErrorException(
+                        createUppaalError(
                         UppaalPath(), rewriter.originalText, dotExpr.fullRange, "SeComp mapper currently cannot query the reachability of an exist state on a sub-template with multiple exit states"
-                    ))
+                    )
+                    )
 
                 // If parent name has been bubbled up, the name from the process info must be rewritten
                 val fullParentProcessName = subProcessInfo.nativeParentProcessName
@@ -1252,9 +1284,12 @@ class SeCompMapper : Mapper {
 
         private fun getAllQuantifierVarValueCombinations(significantQuantifierVars: Map<String, QuantifierInfo>): Sequence<HashMap<String, Int>> = sequence {
             val values = LinkedHashMap(significantQuantifierVars.map {
-                Pair(it.key, it.value.variableRange?.first ?: throw UppaalErrorException(createUppaalError(
+                Pair(it.key, it.value.variableRange?.first ?: throw UppaalErrorException(
+                    createUppaalError(
                     UppaalPath(), "SeComp cannot resolve the value range of the quantifier variable: '${it.key}'"
-                )))
+                )
+                )
+                )
             }.toMap())
 
             val numCombinations = significantQuantifierVars.values.map { it.variableRange!!.second - it.variableRange.first + 1 }.product()
@@ -1281,9 +1316,11 @@ class SeCompMapper : Mapper {
                         (argument.first.toIntOrNull()
                             ?: quantifierVarValues[argument.first]
                             ?: constInts[argument.first]
-                            ?: throw UppaalErrorException(createUppaalError(
+                            ?: throw UppaalErrorException(
+                                createUppaalError(
                                 UppaalPath(), rewriter.originalText, argument.second, "Cannot resolve integer value of argument: '${argument.first}'"
-                            )))
+                            )
+                            ))
                             .toString()
                     }})"
                 else
@@ -1314,9 +1351,11 @@ class SeCompMapper : Mapper {
                 null
 
             if (range != null && range.second < range.first)
-                throw UppaalErrorException(createUppaalError(
+                throw UppaalErrorException(
+                    createUppaalError(
                     UppaalPath(), "Found bounded integer with impossible range: '$type' = int[${range.first}, ${range.second}]"
-                ))
+                )
+                )
 
             return range
         }

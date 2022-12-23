@@ -1,8 +1,8 @@
 package mapping.rewriting
 
 import length
-import mapping.base.LineColumnRange
-import mapping.base.UppaalError
+import uppaal.error.LineColumnRange
+import uppaal.error.UppaalError
 import offset
 import overlaps
 import within
