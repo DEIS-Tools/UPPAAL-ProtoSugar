@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.1//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_2.dtd'>
+<nta>
+	<declaration>// Place global declarations here.
+
+    const int num_devices = 5;
+    typedef int[1, num_devices] device_range;
+
+    chan send;
+    meta bool send_p1[device_range];
+    meta device_range send_p2;
+
+    chan respond[device_range];
+    meta bool respond_p1[device_range];
+</declaration>
+	<template>
+		<name x="5" y="5">Device</name>
+		<parameter>const device_range ID</parameter>
+		<declaration>// Place local declarations here.
+
+    clock c;
+    device_range latest_caller;
+
+    bool secrets[device_range];
+    void merge_secrets(bool new_secrets[device_range])
+    {
+        for (ID : device_range)
+            secrets[ID] = secrets[ID] || new_secrets[ID];
+    }</declaration>
+		<location id="id0" x="-510" y="-272">
+			<name x="-544" y="-306">Waiting</name>
+		</location>
+		<location id="id1" x="-697" y="-238">
+			<name x="-714" y="-221">Pending</name>
+		</location>
+		<location id="id2" x="-926" y="-204">
+			<name x="-969" y="-195">Answering</name>
+			<label kind="invariant" x="-969" y="-178">c &lt;= 10</label>
+		</location>
+		<location id="id3" x="-722" y="-348">
+			<name x="-732" y="-382">Start</name>
+			<urgent/>
+		</location>
+		<init ref="id3"/>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id1"/>
+			<label kind="guard" x="-892" y="-314">c &gt;= 5</label>
+			<label kind="synchronisation" x="-892" y="-297">respond[latest_caller]!</label>
+			<label kind="assignment" x="-892" y="-280">respond_p1 = secrets,
+latest_caller = ID</label>
+			<nail x="-892" y="-238"/>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id1"/>
+			<label kind="assignment" x="-952" y="-340">secrets[ID] = true, latest_caller = ID</label>
+			<nail x="-722" y="-255"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id2"/>
+			<label kind="synchronisation" x="-892" y="-204">send?</label>
+			<label kind="assignment" x="-892" y="-187">latest_caller = send_p2,
+merge_secrets(send_p1), c = 0</label>
+			<nail x="-731" y="-204"/>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id1"/>
+			<label kind="synchronisation" x="-654" y="-238">respond[ID]?</label>
+			<label kind="assignment" x="-654" y="-221">merge_secrets(respond_p1)</label>
+			<nail x="-544" y="-238"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="-688" y="-331">send!</label>
+			<label kind="assignment" x="-688" y="-314">send_p1 = secrets,
+send_p2 = ID</label>
+			<nail x="-663" y="-272"/>
+		</transition>
+	</template>
+	<system>system Device;
+    </system>
+	<queries>
+		<query>
+			<formula>E&lt;&gt; forall (ID_main : device_range) 
+	(forall (ID_secret : device_range) Device(ID_main).secrets[ID_secret] == true) &amp;&amp; Device(ID_main).Pending</formula>
+			<comment></comment>
+		</query>
+	</queries>
+</nta>

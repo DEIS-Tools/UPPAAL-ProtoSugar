@@ -117,7 +117,7 @@ class AutoArrMapper : Mapper {
             if (varListNode.children[1]!!.isNotBlank())
                 varNameNodes.addAll((varListNode.children[1]!! as Node).children.map { child -> (child as Node).children[1] })
 
-            return varNameNodes.map { it.toString() }.withIndex().map { if (it.value == "_") it.index.toString() else it.value }
+            return varNameNodes.map { it.toString() }.map { if (it == "_") "" else it }
         }
 
         private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String>, path: UppaalPath, code: String, autoArr: Node): Collection<UppaalError> {
@@ -149,7 +149,7 @@ class AutoArrMapper : Mapper {
                     )
                     )
 
-            if (dimVars.distinct().size != dimVars.size)
+            if (dimVars.filter { it != "" }.distinct().size != dimVars.filter { it != "" }.size)
                 errors.add(
                     createUppaalError(
                     path, code, autoArr.children[5]!!, "Array '${autoArr.children[1]!!}' has duplicate dimension variable names.", true
@@ -172,6 +172,9 @@ class AutoArrMapper : Mapper {
         }
 
         private fun mapDimension(value: String, index: Int, currDimVar: String): String {
+            if (currDimVar == "")
+                return value
+
             val singleDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)($currDimVar)(?>[^_a-zA-Z0-9\[]|$)""")
             return singleDimPattern.replace(value) { it.value.replace(currDimVar, index.toString()) }
         }

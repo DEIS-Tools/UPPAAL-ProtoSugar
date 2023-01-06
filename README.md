@@ -3,7 +3,7 @@ UPPAAL ProtoSugar – short for "_**Proto**typer for Syntactic **Sugar**_" – a
 
 ProtoSugar is a "middleware" that is integrated between the UPPAAL GUI and the UPPAAL engine where it intercepts and rewrites certain commands/responses going between the GUI and engine. The image below shows a simplified overview of ProtoSugar's integration and functionality, where some things are simplified and some are left out (see Section 3 for in-depth explanations).
 
-![](img/ProtoSugarOverview.png)
+![](images/ProtoSugarOverview.png)
 
 **Image explanation:** The image depicts how an input model or query is intercepted by ProtoSugar and mapped. If the mapping succeeds, the result is sent to the engine, otherwise, errors are returned to the GUI. Next, the engine either returns a successful result or a list of errors. A successful result is simply sent to the GUI, whereas errors are put through the mapping in reverse order to "back-map" them onto their "correct locations" in the original input (since the errors are generated on the mapped input).
 
@@ -22,7 +22,7 @@ This section explains how to use a released/pre-compiled version of ProtoSugar. 
 
 ### 1.1 Prerequisites
 - Java 11 or later is required to run ProtoSugar.
-- ProtoSugar has been tested with "*UPPAAL 4.1.20-stratego-10*" and "*UPPAAL 4.1.20-stratego-11*", but as long as the UPPAAL engine's API or communication protocols do not change, ProtoSugar should keep working with future UPPAAL versions.
+- ProtoSugar has been tested with "*UPPAAL 4.1.20-stratego-10*" and "*UPPAAL 4.1.20-stratego-11*", but as long as the UPPAAL engine's API and/or communication protocols do not change, ProtoSugar should keep working with future UPPAAL versions.
 
 
 ### 1.2 Installation and configuration
@@ -103,12 +103,14 @@ The mapper adds an alternative to "`E[] (not p)`", and not "`E[] p`", due to the
 
 
 ### 2.2 `AutoArr` – Auto Arrays
-This mapper adds a new syntax for instantiating arrays (of type `int` or `bool`) based on a "lambda expression" that takes the index of all array dimensions as input.
+This mapper adds a new syntax for instantiating arrays (of type `int` or `bool`) based on a "lambda expression" that takes the index of all array dimensions as input. In the image below, both the "native" and "auto" versions result in a 10x10 matrix of zeros.
+
+![](images/AutoArr/Usage.png)
 
 **Rationale:** Apart from making it possible to auto-generate different values for each array position, this also makes it easier to initialize huge arrays since the user does not need to enter every value for every position.
 
 #### 2.2.1 Syntax and Semantics
-The syntax follows the pattern below presented. To ignore the index of one or more dimensions, simply give the corresponding dimension variables the name "`_`" (underscore).
+The syntax follows the pattern presented below. To ignore the index of one or more dimensions, simply give the corresponding dimension variable(s) the name "`_`" (underscore).
 
 - `Type Identifier [SIZE_1][...][SIZE_N] = { IndexVar_1, ..., IndexVar_N -> Expression };`
 
@@ -119,7 +121,7 @@ The syntax follows the pattern below presented. To ignore the index of one or mo
 - `AutoArr` only works when every `SIZE_x` is either an integer-primitive (e.g. `7`), or an integer constant whose value is given directly as an integer-primitive (e.g. `const int LENGTH = 7`).
     1. Sizes that don't work include `1+2` or `LEN` where `const int LEN = 3+OTHER_CONST`.
     2. Bounded integers and typedefs (i.e. `int[1,2]` or `typedef int[1,2] device_range`) cannot be used as the size.
-    3. Functions (even if computable at compile-time) cannot be used as the size.
+    3. Function results (even if computable at compile-time) cannot be used as the size.
     4. Template parameters (even if constant) cannot be used as the size.
 - `AutoArr` cannot parse multiple constants defined in the same declaration (e.g. "`const int A = 1, B = 2;`"). 
 
@@ -136,7 +138,7 @@ Otherwise, there should be full support/integration for all other language featu
 ### 2.3 `PaCha` – Parameterized Channels
 This mapper adds parameterization and value-passing to channels and synchronizations. It expands the native `chan`-type syntax with an optional "type list" (see "2.3.1 Syntax and Semantics") that states how many values, and of what type, said channel will pass from the emitter to the receiver when two processes synchronize.
 
-**Rationale:** It is not unusual for processes to exchange data, but there is no native value-passing feature in UPPAAL. A typical solution is to declare some global state that the processes can use to interact, but this clutters the global state-space and "moves data out of" processes. Thus, this mapper emulates direct value-passing between processes which allows the emitter and receiver to seamlessly exchange local data when synchronizing. This also removes clutter from the global state-space. (See Section "2.3.3 Examples" for the Gossip Example with and without parameterized channels.)
+**Rationale:** It is not unusual for processes to exchange data when synchronizing, but there is no native value-passing feature in UPPAAL. A typical solution is to declare some global state that the processes can use to interact, but this clutters the global state-space and "moves data out of" processes. Thus, this mapper emulates direct value-passing between processes which allows the emitter and receiver to seamlessly exchange local data when synchronizing. This also removes clutter from the global state-space. (See Section "2.3.3 Examples" for the Gossip Example with and without parameterized channels.)
 
 #### 2.3.1 Syntax and Semantics
 The syntax follows the patterns shown below, where for each channel identifier, `Identifier`, all instances of `N` has the same value and all instances of `M` have the same value. Whether the channel is declared as an array or not is optional. Any valid constant expression (or integer range) can be used as the size of an array dimension. All types (even typedefs) apart from explicit structs and references are supported in the channel type list (typedefs that represent structs are supported).
@@ -167,39 +169,64 @@ This section presents two versions of the "gossiping girls" algorithm that are m
 
 | Native UPPAAL using shared, global state        |
 | ----------------------------------------------- |
-| ![](img/PaCha/Gossip%20-%20Native%20shared.png) |
-| All state and merge-logic is stored in the global scope. Edges contain a lot of "management logic". The receiver executes the merge-logic both for itself and the emitter, whereas it would make most sense for the emitter to handle its own state. |
+| ![](images/PaCha/Gossip%20-%20Native%20shared.png) |
+| All state and merge-logic is stored in the global scope. Edges contain a lot of "management logic". The receiver executes the merge-logic both for itself and the initial emitter, whereas it would make most sense for the emitter to handle its own state. |
 
 | New shorthand syntax by `PaCha`                |
 | ---------------------------------------------- |
-| ![](img/PaCha/Gossip%20OneWay%20shorthand.png) |
+| ![](images/PaCha/Gossip%20OneWay%20shorthand.png) |
 | Secrets and merge-logic are moved into the template. The channel `send` no longer needs to be an array which also removes the "select" clause on the "Pending -> Answering transition. Also, the text/code on the edges in the template is more compact/concise and merge-logic is only executed on receiver-edges, where it makes the most sense. |
 
 ### 2.4 `SeComp` – Sequential Composition
-This mapper adds support for "embedding templates into other templates". 
+This mapper adds support for "sub-templates", which can be embedded into "normal" templates and other sub-templates in the form of a single location. This one location in the "parent template" thus represents an entire sub-template underneath. The image below illustrates this concept. The top automaton is behaviorally equivalent to the two below automata combined.
 
-**Rationale:** 
+![](images/SeComp/Principle.png)
+
+**Rationale:** Sequential composition is both a mechanism for abstraction/minimization and for reuse. Big and complicated parts of an automata can be hidden away in a sub-template and duplicated/shared behavior only needs to be modeled once. With parameterization (planned feature, see Sections 2.4.2 and 2.4.3), it is also possible to reuse generic behavior in a flexible way.
 
 #### 2.4.1 Syntax and Semantics
+This section describes how to define a sub-template, how to embed a sub-template into another template, how sub-templates appear in the simulator, and how to query sub-templates.
 
-`__SubTem`
+##### 2.4.1.1 Define a sub-template
+To declare a template as a sub-template, simply prepend its name with two underscores, e.g., `__SubTem` as shown in the image above. 
 
-`::SubTem sub::`
+A sub-template must have at least one "entry" and one "exit" location that are separate, and one transition. The initial location will serve as the "entry location" to the sub-template and any location with no outgoing transitions will act as an "exit location". If an exit location is reached, control is returned to the parent and the sub-template returns to its entry location, thus waiting to receive control again.
 
-`Template.sub.Location`
+The next section explains how control is passed from a parent to a sub-template.
 
+##### 2.4.1.2 Instantiate/embed a sub-template
+To embed/instantiate a sub-template into some parent template, give a location in the parent template a name of the following form: ``::[SubTemplate name] [instance name]::``, where the "`SubTemplate name`" does not need to include the first two underscore and "`[instance name]`" must be any valid identifier. An example is `::SubTem sub::` from the image above. Whenever the parent template is instantiated, a sub-template is instantiated as well for each "embed location" in said parent.
 
-Process names are mapped as well
+_**NOTE1:** You cannot instantiate a sub-template in user-code (i.e., on the `system` line in `System declarations`). Sub-templates are only instantiated when a normal template that uses sub-templates is instantiated._
 
+_**NOTE2:** You may leave out the "`[instance name]`" in which case the corresponding state has no name and cannot be used in queries._
+
+Whenever a parent process enters an embed location, control is transferred to the sub-template instance that correspond to that location, and as mentioned above, whenever the sub-template reaches an exit location, control is restored to the parent.
+
+##### 2.4.1.3 Process names and simulation
+Since the UPPAAL GUI is not capable of drawing one template into another, the best approximation is to make an instance of a parent template and all its sub-templates, and then name the sub-templates thereafter. The image below shows the system modeled above in the simulator. Notice how only `Tem` is instantiated in the "System declarations", but both `Tem` and `Tem.sub` are processes in the simulator. All sub-template instances have this naming-relationship with their parent instance.
+
+![](images/SeComp/Simulator.png)
+
+Notice also how, even though `Tem` is currently in a location that should allow it to take the `D`-edge, only the `B`-edge on `Tem.sub` show up as an enabled transition. Only when `Tem.sub` has reached the exit location may `Tem` continue.
+
+If you leave the instance name blank on the embed location, an autogenerated name such as `Tem.SubTem(0)` is generated instead, which will be harder to read in case there are multiple nameless `SubTem` instances on the same parent.
+
+##### 2.4.1.4 Query a sub-template
+To query a sub-template, simply use the exiting DOT-notation. To query if `Tem.sub` can enter its exit location, simply write "`E<> Tem.sub.Exit`". You can query/use any location, function, or variable (even structs which also use the DOT-notation).
+
+_**NOTE:** Even though nameless sub-template instances get a readable name (e.g., `Tem.SubTem(0)`), using such names/locations in a query will produce an error._
 
 #### 2.4.2 Limitations
-- Sub-templates cannot have parameters.
-- Templates (and partial instantiations) that use sub-templates cannot be freely instantiated (i.e. directly mentioned on the "system"-line) when they have free scalar parameters.
+- Sub-templates cannot have parameters, though they can access global variables like all other templates.
+- If templates (and partial instantiations) that use sub-templates have free scalar parameters, these cannot be freely instantiated (i.e. directly mentioned on the "system"-line).
+- The mapper must be able to infer the number of all instantiated normal templates that use sub-templates, in order to compute how many sub-templates must be instantiated. Since the mapper is not a complete parser/compiler, it might not understand the instantiation logic if it is too complicated.
+  - For example, if the result of a compile-time-computable function determines the number of instances of some template, the mapper would not be able to compute that.
+- `SeComp` cannot parse multiple constants defined in the same declaration (e.g. "`const int A = 1, B = 2;`").
 
 #### 2.4.3 Planned features
-- Parametrization
-
-#### 2.4.4 Examples
+- Hierarchies: It should be possible to define a sub-template in the scope of another (sub-)template (i.e., not directly in the global scope), which would allow a sub-template to access the instance-variables of the parent (sub-)template instance(s). Just like how a method in a class can access the values of it's class' class-variables, and not just the variables defined in the method.
+- Parametrization: Sub-templates should support parameters. It should be possible to pass any variable that is "in scope" wherever a sub-template is instantiated.
 
 
 
