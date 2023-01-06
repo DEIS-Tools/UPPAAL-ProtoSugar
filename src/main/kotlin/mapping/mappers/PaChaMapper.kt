@@ -17,7 +17,7 @@ class PaChaMap : HashMap<String, PaChaInfo>()
 
 class PaChaMapper : Mapper {
     override fun getPhases(): PhaseOutput
-        = PhaseOutput(sequenceOf(Phase1()), null, null)
+        = PhaseOutput(listOf(Phase1()), null, null)
 
     private class Phase1 : ModelPhase()
     {
@@ -460,7 +460,7 @@ class PaChaMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>)
+        override fun backMapModelErrors(errors: List<UppaalError>)
             = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 }

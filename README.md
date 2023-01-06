@@ -22,7 +22,7 @@ This section explains how to use a released/pre-compiled version of ProtoSugar. 
 
 ### 1.1 Prerequisites
 - Java 11 or later is required to run ProtoSugar.
-- ProtoSugar has been tested with "*UPPAAL 4.1.20-stratego-10*" and "*UPPAAL 4.1.20-stratego-11-rc2*", but as long as the UPPAAL engine's API or protocols do not change, ProtoSugar should keep working with future UPPAAL versions.
+- ProtoSugar has been tested with "*UPPAAL 4.1.20-stratego-10*" and "*UPPAAL 4.1.20-stratego-11*", but as long as the UPPAAL engine's API or communication protocols do not change, ProtoSugar should keep working with future UPPAAL versions.
 
 
 ### 1.2 Installation and configuration
@@ -189,6 +189,9 @@ This mapper adds support for "embedding templates into other templates".
 `Template.sub.Location`
 
 
+Process names are mapped as well
+
+
 #### 2.4.2 Limitations
 - Sub-templates cannot have parameters.
 - Templates (and partial instantiations) that use sub-templates cannot be freely instantiated (i.e. directly mentioned on the "system"-line) when they have free scalar parameters.
@@ -201,7 +204,7 @@ This mapper adds support for "embedding templates into other templates".
 
 
 ## 3. Architecture and extensibility
-ProtoSugar is a command line program written in Kotlin and built using Gradle (all through JetBrains IntelliJ). In the following Section "3.1 Structure of ProtoSugar" explains how the code of ProtoSugar is structured. Section "3.2 Dataflow through ProtoSugar" explains which data ProtoSugar intercepts and where/how it is mapped. Section "3.3 Implementing a mapper" explains how to compile the source code and how to implement a new mapper.
+ProtoSugar is a command line program written in Kotlin and built using Gradle (all through JetBrains IntelliJ). In the following Section "3.1 Structure of ProtoSugar" explains how the code of ProtoSugar is structured. Section "3.2 Dataflow through ProtoSugar" explains which data ProtoSugar intercepts and where/how it is mapped. Section "3.3 Implementing a mapper" explains how to compile the source code and how to implement a new mapper. Section "3.4 Compile and Run" explains how to compile and run ProtoSugar.
 
 
 ### 3.1 Structure of ProtoSugar
@@ -223,7 +226,7 @@ The `uppaal`-part is split into the `model` and `error` sub-parts.
 
 The `model`-part contains classes for storing (and outputting) the tree structure and data of a UPPAAL model. The `Simple XML` Kotlin library is used to parse the UPPAAL model file (XML format) into objects of these classes. All of these classes implement the marker-interface `UppaalPojo`, which simply allows the code to generalize all UPPAAL model objects (see for example below).
 
-The `error`-part contains classes for storing (and outputting) UPPAAL error data, two of which are the `UppaalPath` and `LineColumnRange` classes. The `UppaalPath` class is just a list of `UppaalPojo` objects that represents a path to some object in the loaded UPPAAL model. Since UPPAAL bases "text-ranges" on start/end lines/columns (and not character position), the `LineColumnRange` class is implemented to store this data and also to map between line/column-ranges and character-ranges.
+The `error`-part contains classes for storing (and outputting) UPPAAL error data, two of which are the `UppaalPath` and `LineColumnRange` classes. The `UppaalPath` class is just a list of `UppaalPojo` objects that represents a path to some object in the loaded UPPAAL model. Since UPPAAL bases "text-ranges" on start/end lines/columns (and not character position), the `LineColumnRange` class is implemented to store this data and also to map between line/column-ranges and character-ranges. Finally, these come together in the `UppaalError` class which stores all information from a UPPAAL error (i.e., path, range, message, and context), as well as some metadata to denote severity and order of creation.
 
 #### 3.1.3 Mapping-part
 The `part` part contains the `Orchestrator`, as well as the `mappers`, `parsing`, and `rewriting` sub-parts.
@@ -235,7 +238,7 @@ The `parsing`-part contains the "`Confre`" and related helpers. The `Confre`-cla
 The `rewriting`-part contains the `Rewriter`-class and its related `BackMap`-classes. Practically all mappers need to rewrite some original input text either by "inserting", "replacing", or "appending" new text. Thus, the `Rewriter` provides this functionality. Furthermore, since the mappers (and their phases) are run sequentially, many "layers of transformation" may be applied to the original model. The `Rewriter` thus also has a "back-mapping" system for UPPAAL errors, such that errors generated on the mapped model/query can be "moved back onto" their correct spot in the original input text. Section 3.3 describes how to use the `Rewriter` in more detail.
 
 
-### 3.2 Dataflow through ProtoSugar
+### 3.2 Dataflow through ProtoSugar & Mappers
 As mentioned in Section 3.1.3, a "mapper" is split into three phases – the "model", "simulation", and "query" phase – which may or may not be implemented depending on the mapper. 
 
 - The model phase can map "a model going to the engine" and back-map "the model errors going back to the GUI".
@@ -283,7 +286,7 @@ function BackMapErrors(errors: UppaalError)
     return errors
 ```
 
-**Query flow:**
+**Query flow:** Since queries can only "output" one error, the pseudocode below may only output one error as well.
 ```text
 function InterceptQuery(query: String)
     mappedQuery = query
@@ -307,16 +310,302 @@ function BackMapError(error: UppaalError)
 ```
 
 #### 3.2.1 Notes on error back-mapping
-This is not stated in the pseudocode above, but when back-mapping an error, only the phases that were run **before** the creation of the error will actually back-map said error, since the error will not be affected or moved around by the phase that created it, nor any later phases. I.e. an error created by the very first phase requires no back-mapping, whereas any error originating from the UPPAAL engine itself will require back-mapping from all enabled phases.
+This is not stated in the pseudocode above, but when back-mapping an error, only the phases that were run **before** the creation of the error will actually back-map said error. This is because the error will not be affected or moved around by the phase that created it, nor any later phases. I.e. an error created by the very first phase requires no back-mapping, whereas any error originating from the UPPAAL engine itself will require back-mapping from all enabled mappers/phases.
 
 
 ### 3.3 Implementing a mapper
+Now that Section 3.1 has explained the structure of the source code and Section 3.2 has explained how ProtoSugar intercepts and maps various data sent between the UPPAAL GUI and engine, this section will finally explain how to add a new mapper to ProtoSugar.
 
-#### Using the Confre
+This section explains the `Mapper`-interface, how to define and register a minimal mapper, how to implement mapper phases, and how to use the `Confre` and `Rewriter` classes for, respectively, parsing and rewriting text. This includes both mapping models/queries and "back-mapping" UPPAAL errors. Additionally, the existing mappers (see directory `src/main/kotlin/mapping/mappers`) provide practical examples of all these points at varying levels of complexity:
 
-#### Using the Rewriter
+1. The `TxQuan` mapper (see Section 2.1) is the simplest mapper, and only implements a query-phase.
+2. The `AutoArr` mapper (see Section 2.2) and `PaCha` mapper (see Section 2.3) both implement a single model-phase. `AutoArr` is most likely simpler to understand than `PaCha`. `PaCha` further builds indices of metadata about previously parsed parameterized channels for future parsing and error reporting tasks.
+3. Finally, the `SeComp` mapper implements 3 model-phases (index, validate, map), a simulator phase, and a query-phase, some more complex than others. It makes extensive use of maps/dictionaries of metadata across all phases. One good tip to take from this mapper is how all shared data is created inside the `getPhases()` method from the `Mapper`-interface (see Section 3.3.1 for more on this) so that these indices are "clean" every time the phases are requested.
 
+#### 3.3.1 The `Mapper`-interface
+All mappers have their own "mapper class", and as was quickly mentioned in Section 3.1.3, all mapper classes must implement the `Mapper`-interface (seen in the code-box below). This interface defines just one method, `getPhases()`, that outputs a `PhaseOutput`-object (the definition of which can also be seen in the code-box below). Like what is described in Section 3.2, `PhaseOutput` may contain zero or more model-phases, zero or one simulator phase, and zero or one query phase. As can be seen, every type of phase has its own base class. The phase-classes are documented further in the source code and in Section 3.3.2.
 
+Everytime a UPPAAL model is sent through ProtoSugar, the `Orchestrator` calls `getPhases()` to get a new set of phase-objects from each enabled mapper. In this way, phase-objects may store indexes, metadata, and other information needed for later phases without having to worry about resetting all these indexes. Thus, all mapper phases and simulator phases are used once to set up the mapped model/system, but query-phases may be used multiple times.
+
+```Kotlin
+/// File: src/main/kotlin/mapping/mappers/Mapper.kt
+interface Mapper {
+    fun getPhases(): PhaseOutput
+}
+
+data class PhaseOutput(val modelPhases: List<ModelPhase>, val simulatorPhase: SimulatorPhase?, val queryPhase: QueryPhase?)
+
+// Definitions of the abstract "ModelPhase", "SimulatorPhase", and "QueryPhase" classes.
+```
+
+The rest of Section 3.3 will now explain general mapper-implementation guidelines, as well as how to use the built-in parsing and mapping features. 
+
+#### 3.3.2 Define and register a "nothing-mapper"
+The "nothing-mapper" is a mapper with no phases, i.e., it can't do anything (except help demonstrate how to add a mapper to ProtoSugar). 
+
+First, define a new class for the nothing-mapper (in the `src/main/kotlin/mapping/mappers`-directory). Make the class implement the `Mapper`-interface and implement `getPhases()` to output "no phases" as shown in the code-box below.
+
+```Kotlin
+class NothingMapper : Mapper {
+    override fun getPhases(): PhaseOutput
+        = PhaseOutput(sequenceOf(), null, null)
+}
+```
+
+Next, in the `src/main/kotlin/Main.kt`-file, find the `availableMappers` variable and add `NothingMapper` with any code-name you like (in this case `NoMap`, which follows the general pattern of other mapper code names).
+
+```Kotlin
+/// File: src/main/kotlin/Main.kt
+private val availableMappers = mapOf(
+    Pair("PaCha", PaChaMapper()),
+    Pair("AutoArr", AutoArrMapper()),
+    //...,
+    Pair("NoMap", NothingMapper())   // <------- Newly added
+)
+```
+
+That is it! Simply run ProtoSugar with no arguments (see Section 3.4 for help) and observe that `NoMap` now shows up in the "usage" prompt as a valid mapper.
+
+```
+usage: ProtoSugar MODE MAPPERS
+[...]
+MAPPER: 'PaCha' | ... | 'NoMap'   <----- Should show up here
+```
+
+#### 3.3.3 Implement phases in a mapper
+For a mapper to do "something", it must implement one or more phases to carry out that logic. The example `SomethingMapper` below has two model phases, a simulator phase, and a query phase. Furthermore, data is shared across the model and query phases through the `metadata` map, which is passed to each involved phase's constructor. 
+
+```Kotlin
+class SomethingMapper : Mapper {
+    override fun getPhases(): PhaseOutput {
+        val metadata = HashMap<String, Any>()
+        return PhaseOutput(
+            listOf(M1(metadata), M2(metadata)), Sim(), Que(metadata)
+        )
+    }
+
+    private class M1(val metadata: Map<String, Any>) : ModelPhase() 
+    { /* ... */ }
+    private class M2(val metadata: Map<String, Any>) : ModelPhase() 
+    { /* ... */ }
+  
+    private class Sim : SimulatorPhase() 
+    { /* ... */ }
+  
+    private class Que(val metadata: Map<String, Any>) : QueryPhase() 
+    { /* ... */ }
+}
+```
+
+**Simulator phase:** A simulator phase's only has one function, `mapProcesses(...)`, that gets a list of all processes that are output by the UPPAAL engine, although the only available information is the name and template. Only the `name` variable is mutable and changes to `name` will reflect in the GUI.
+
+```Kotlin
+private class Sim : SimulatorPhase() {
+    override fun mapProcesses(processes: List<ProcessInfo>)
+    { /*...*/ }
+}
+
+data class ProcessInfo(var name: String, val template: String)
+```
+
+**Query phase:** A query phase has the `mapQuery(...)` and `backMapQueryError(...)` functions for mutating queries and back-mapping errors on these. Both queries (type `String`) and errors (type `UppaalError`) can be freely changed however the implementer wants. It is recommended to use the built-in `Confre` and `Rewriter` tools that are described in Sections 3.3.4 and 3.3.5, respectively, to perform "parse", "map", and "back-map" operations.
+
+```Kotlin
+private class Que(val metadata: Map<String, Any>) : QueryPhase() {
+    override fun mapQuery(query: String): Pair<String, UppaalError?>
+    { /* ... */ }
+    override fun backMapQueryError(error: UppaalError): UppaalError
+    { /* ... */ }
+}
+```
+
+**Model phase:** A Model phase looks slightly peculiar compared to the other two phases, due to the way the model is passed to the phase. A UPPAAL model is represented by a tree built from the classes found in the `src/main/kotlin/uppaal/model` directory, and the model phase is therefore build around registering "handlers" for the desired type(s) of tree-nodes. Thus, the `Orchistrator` becomes then responsible for the tree visitation logic and for passing model-nodes to the valid handlers. This reduces the amount of (reused) logic in model phases. A handler can be registered with a "path `prefix`" that states that the ancestry of the handled node must match the prefix. For example, in the code-box below, the `mapGlobalDeclaration`-handler is registered for `Declaration`-nodes, but only those which are located on the `Nta`-node (the root node).
+
+_**NOTE:** The UPPAAL model node classes are structured after the UPPAAL model XML file format._ 
+
+As can be seen below, the model there is a handler for "Declarations in the global scope"-node and the "System declarations"-node. A handler takes a "UPPAAL path" and a "UPPAAL model node" as input and produces a "list of UPPAAL errors" as output. The file containing the `UppaalError`-class also contains some helper functions for creating new `UppaalError`-objects.
+
+_**NOTE:** `UppaalError`-objects have a `isUnrecoverable` boolean which, if true, means "this error prevents the mapper from producing any sensible output". If the `Orchestrator` detects an unrecoverable error from a phase, it preemptively returns all known errors to the GUI without sending the model to the UPPAAL engine_.
+
+Finally, the model phase has the `backMapModelErrors(...)` function that takes and returns a list of errors. All errors that might be affected by the current phase is passed to this function to be back-mapped. It is recommended to use the built-in `Confre` and `Rewriter` tools that are described in Sections 3.3.4 and 3.3.5, respectively, to perform "parse", "map", and "back-map" operations.
+
+```Kotlin
+private class M1(val metadata: Map<String, Any>) : ModelPhase() {
+    init {
+        register(::mapGlobalDeclaration, prefix = listOf(Nta::class.java))
+        register(::mapSystem)
+        // You can register any number of handlers. Even multiple times for the same node-type
+    }
+  
+    private fun mapGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError>
+    { /* ... */ }
+    private fun mapSystem(path: UppaalPath, system: System): List<UppaalError>
+    { /* ... */ }
+
+    override fun backMapModelErrors(errors: List<UppaalError>): List<UppaalError>
+    { /* ... */ }
+}
+```
+
+#### 3.3.4 Using the Confre
+"Confre" is short for "Context-free (grammar)", and is basically "a Regex, but for context-free grammars instead of regular expressions". Using regular expressions to parse UPPAAL code quickly becomes insufferable to maintain (trust me), and when trying to parse more complex code that might have nested or repeating patterns, regular expressions simply aren't powerful enough. This is the motivation for the Confre.
+
+A `Confre`-object is instantiated with a grammar and afterwards supports the operations: `matchExact`, `find`, and `findAll`. You can find the full "grammar of a grammar" at the top of the `src/main/kotlin/mapping/parsing/Confre.kt`-file, but essentially, terminals are written "`NAME = REGEX`" and non-terminals are written as "`NAME :== NON_TERIMINAL_GRAMMAR .`" (yes, followed by a DOT).
+
+```Kotlin
+val declarationConfre = Confre("""
+    ID = [_a-zA-Z][_a-zA-Z0-9]*
+    INT = [0-9]+
+    BOOL = true|false
+    
+    Declaration :== ['const' | 'meta'] ('int' | 'bool') ID '=' (INT | BOOL) ';'.
+""".TrimIndent())
+
+val result1 = declarationConfre.matchExact("const int SIZE = 7;")      // Type: ParseTree?
+val result2 = declarationConfre.find("func(); int index = 0; a += 1")  // Type: ParseTree?
+val result3 = declarationConfre.findAll("int a = 0; int b = 0;")       // Type: List<ParseTree>
+```
+
+The return type of the three Confre operations are shown in the code-box above. They all involve the `ParseTree`-interface, which has two implementing classes: `Node` (with any number of children) and `Leaf` (no children). The parse tree is structured after the grammar, so a `Node` might represent a "multiple", "optional", "choice", "parentheses", or "sequence" and a `Leaf` is either a "named terminal", "anonymous terminal", or "a blank choice option".
+
+`ParseTree`, `Node`, and `Leaf` contains utility functions to perform tree-walks (pre- and post-order) and to get the position/range of the matched text in the input string. The position/range functions are especially useful when extracting the matched text, creating new `UppaalError`-objects, or operating the `Rewriter` mentioned in the next section.
+
+#### 3.3.5 Using the Rewriter & BackMaps
+One of the most common operations in a mapper is to rewrite some text. The `Rewriter` class provides `insert`, `replace`, and `append` operations, as well as "back-map mechanisms" that allows the programmer to easily relocate UPPAAL errors on the mapped text onto the original text before mapping.
+
+##### 3.3.5.1 Rewriting text
+A `Rewriter`-object is instantiated with some "original text", which is to be modified. Then, once the `getRewrittenText()`-function is called, the `Rewriter` bulk-executes all registered operations in the order of "start location" and then "addition order" for tie-breaking. The code-box below shows an example. See the `src/main/kotlin/mapping/rewriting/Rewriter.kt`-file for extensive documentation on the method calls.
+
+Every operation assumes that it operates on the original string, so the user does not have to think about how the offset caused by inserting or replacing text affects future operations. This is handled internally by `getRewrittenText()`.
+
+```Kotlin
+val rewriter = Rewriter("This is my original text It have a grammatical error")
+
+rewriter.insert(24, ".") // Fix punctuation. (Start location is 24)
+rewriter.append(".") // (Start location is INT32_MAX to make append always last)
+
+// Make it "It has no grammatical errors"
+rewriter.insert(52, "s")
+rewriter.replace(28..33, "has no") // (Start location is 28)
+
+rewriter.replace(11..19 , "") // Remove "original"
+
+print(rewriter.getRewrittenText())
+// "This is my text. It has no grammatical errors."
+```
+
+One limitation is that no operations are allowed to overlap. Fortunately, the only two types of intersection are "_replace/replace_" and "_replace/insert_". Append operations cannot intersect any other operations since they are just added at the end of the original text (no problem here). Insert operations to the same text index may seamlessly interleave in order of addition (no problem here). However, since replace operations have a range, these can overlap each other and contain insert operations. These are the cases not allowed.
+
+_NOTE: You can always use `rewriterObj.originalText` to get the original string that was given to the constructor._
+
+##### 3.3.5.2 Back-mapping errors (simple back-maps)
+The call to `getRewrittenText()` not only compiles the new string, but also compiles "back-maps" used to relocate errors (i.e., `UppaalError`) on rewritten text/code onto the original text/code. When mapped UPPAAL code is sent to the UPPAAL engine, the returned errors may not necessarily "fit" the original code, without first compensating for the changes that were made to the original. For example, if 10 characters are inserted at the beginning of a line, and an error is found at the end of said line, the error would have to be moved 10 characters back when highlighting in the original code.
+
+This is done with a single call to the `Rewriter`'s `backMapError(UppaalError)`-function, which compensates for all rewrite operation that happened "before" the given error's location (since later operations won't affect the error). The code-box below shows an example (which is impossible).
+
+```Kotlin
+var rewriter = Rewriter("int array[5] = 3;") // Erroneous code
+
+// This offsets all code one line downwards
+rewriter.insert(0, "const int AUTO_GEN = 42;\n")
+
+val error = SendCodeToEngine(rewriter.getRewrittenText())
+assert(error.line == 2)
+assert(error.message == "Invalid initializer for array.")
+
+rewriter.backMapError(error)
+assert(error.line == 1) // Now fits original text
+```
+
+This type of automated back-mapping is called "simple back-mapping", since the rules are quite simple: "relocate the error by reversing the offset caused by the rewrite operations". However, sometimes specialized rules are needed to specify how the error maps back to the original code. This is handle by "advanced back-maps" which are described in the next section.
+
+##### 3.3.5.3 Back-mapping errors (advanced back-maps)
+When errors occur within the text inserted/replaced/appended by the `Rewriter`, it might not be obvious/simple how to relocate the error. Therefore, the `Rewriter` supports "advanced back-maps" which allow the user to override (using lambda-expressions) the path, range, message, and context of an error. 
+
+To exemplify, we use the `AutoArr` mapper. `AutoArr` detects the size of the array and replicates the array once for each position where the "index variable(a)" has been replaced by corresponding constants that depend on the position (see the code-box below). Thus, if there is an error on any of the resulting expressions/positions, these errors should all be moved onto the original expression (i.e. `i*2` below) in the original text/code.
+
+```
+int arr[4] = { i -> i*2 };
+
+\/ AutoArr mapping
+
+int arr[4] = { 0*2, 1*2, 2*2, 3*2 };
+```
+
+All function calls to the rewrite-operations (`fun insert(...): InsertOp`, `fun replace(...): ReplaceOp`, `fun append(...): AppendOp`) return an operation-object, that can be extended with one or more advanced back-maps by calling `addBackMap()`.
+
+```Kotlin
+var rewriter = Rewriter("int arr[4] = { i -> i*2 };")
+
+rewriter.replace(15..22, "0*2, 1*2, 2*2, 3*2") // replace "i -> i*2"
+    .addBackMap() // Adds an advanced back-map to the operation.
+    .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR) // Activate if error is fully contained in new, placed-in text.
+    .overrideErrorRange { (20..22) } // Move the error onto the range corresponding to "i*2" in original text.
+
+val error = SendCodeToEngine(rewriter.getRewrittenText())
+rewriter.backMapError(error) // Same procedure as before. Rewriter determines 
+```
+
+`activateOn` can also be called as `activateOn(IntRange, ActivationRule)` to specify the "activation range", which must be a range within the "new text" (in this case, `0*2, 1*2, 2*2, 3*2`). While the activation range is given relative to the "new text", the rewriter automatically converts it into a range inside the rewritten text produced by the `getRewrittenText()` call. Note, the range given in `overrideErrorRange(...)` is relative to the original text. The remaining override functions are: `overridePath(...)`, `overrideMessage(...)`, and `overrideContext(...)`.
+
+In case one would like to avoid duplicate errors on the `i*2` part, the rewriter also supports a `discardError(Predicate<UppaalError>)` call. If the predicate returns true, a "request discard" is output by the call to `rewriter.backMapError(...)` call, and then it is up to the surrounding code to discard the error. The code below basically states: "If an error with the same message was previously handled by this back-map: discard the later error".
+
+```Kotlin
+val recurringErrors = HashSet<String>() // <---
+rewriter.replace(replaceRange, replacement)
+    .addBackMap()
+    .discardError { !recurringErrors.add(it.message) } // <--- 
+```
+
+Lastly, only one advanced back-map will ever be applied to one error, even if two or more advanced back-maps could validly be applied. Thus, advanced back-maps also support a `withPriority(int)` call, where the back-map with the highest priority number gets applied (it uses the earliest added back-map when tie-breaking).
+
+##### 3.3.5.4 Back-mapping tips
+An easy way to use the rewriter for back-mapping is through the code examples shown below. This is how all current mappers handle back-mapping. In the model phase, many errors might be output and some errors might be preferable to ignore. Thus, the errors output are simply all errors that don't "request discard" during back-mapping. In the query phase, only one error is ever output and not much can be done about that error, so it is simply back-mapped and returned. 
+
+```Kotlin
+// Typical back-mapping in model phase
+val rewriters = HashMap<String, Rewriter>() // Uppaal path -> Rewriter
+
+override fun backMapModelErrors(errors: List<UppaalError>)
+    = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
+
+// Typical back-mapping in query-phase
+var rewriter = Rewriter("") // rewriter is overwritten during query-mapping
+
+override fun backMapQueryError(error: UppaalError): UppaalError {
+  rewriter.backMapError(error)
+  return error
+}
+```
+
+### 3.4 Compile and Run
+You can either run ProtoSugar directly through IntelliJ, or by building the jar-file and running this.
+
+#### 3.4.1 Run in IntelliJ
+The easiest way is to go to the `Main.kt` file and find the `main()` function. 
+
+- Right next to the (first) line-number on which `main` is located, there should be a green play-button. Press this to create a "run configuration" with no arguments.
+- Go to the "run configurations"-dropdown at the top-right of IntelliJ and press "Edit Configurations...".
+- In the "MainKt" Kotlin-configuration, in the "Program arguments", configure ProtoSugar to run as a server, run on a file, or run in debug, as explained in the "usage" instructions that show up when run with no arguments or in Sections 1.2 and 1.3.
+
+I usually run ProtoSugar on a file. Since there is not yet a "testing configuration" that makes it easy to debug and run tests on the simulator or query parts, the only solution is currently to make temporary modifications to the `runOnFile(...)` function in the `Main.kt` file where you manually ask the orchestrator to handle some pre-defined test input. Use arguments similar to these to run ProtoSugar on a file:
+- `-file "/path/to/uppaal-model.xml" -mappers [mappers]`
+
+If you want to configure ProtoSugar to run as a server through WSL, use the following arguments:
+- `-server "wsl, LD_LIBRARY_PATH=/path/to/uppaal/server/build/lib-linux64/lib, /path/to/uppaal/server/build/linux64-release/build/bin/server" -mappers [mappers]`
+  - Replace the paths with the ones that lead to your clone of the [UPPAAL repository](https://github.com/UPPAALModelChecker/uppaal), which you should set up using the guide in the UPPAAL repo wiki.
+
+#### 3.4.2 Build and run jar-file
+To build the jar, first go to IntelliJ and:
+- Open the "Gradle"-tab in the top-right-side of the window.
+- Run the "Tasks > build > build" task by double-clicking it.
+- Once done, look in the Project Explorer in the directory "`build/libs/UppaalMappers-XYZ.jar`", where XYZ is the `version` defined in the `gradle.build`-file.
+  - Note "UppaalMappers" is an old name.
+- Copy this file to somewhere with the name "`protosugar-XYZ.jar`".
+
+Running the jar uses the same procedure as described in Sections 1.2 and 1.3. Simply run the jar using Java like any other jar and configure how it should run using the command line parameters. For example:
+- `java -jar /path/to/protosugar-XYZ.jar -file /path/to/uppaal-model.xml -mappers PaCha`
+- `java -jar /path/to/protosugar-XYZ.jar -server /path/to/server[.exe] -mappers PaCha`
 
 ## 4 Additional comments
-As of writing, do not create free reference parameters in a template and instantiate said template freely. This causes the start/end columns of the resulting "invalid free parameter type" error to start and end on column "2147463674" (or similar), which crashes ProtoSugar due to "index out of bounds"-related errors.
+As of writing, do not create free reference parameters in a template and instantiate said template. This causes the start/end columns of the resulting "invalid free parameter type" error to start and end on column "2147463674" (or similar), which crashes ProtoSugar due to "index out of bounds"-related errors during back-mapping.

@@ -2,6 +2,7 @@ import mapping.mappers.*
 import mapping.parsing.Confre
 import mapping.parsing.Node
 import mapping.Orchestrator
+import mapping.rewriting.Rewriter
 import uppaal.error.UppaalError
 import uppaal.error.UppaalPath
 import uppaal.error.createUppaalError
@@ -25,9 +26,7 @@ private val availableMappers = mapOf(
     Pair("PaCha", PaChaMapper()),
     Pair("AutoArr", AutoArrMapper()),
     Pair("TxQuan", TxQuanMapper()),
-    Pair("SeComp", SeCompMapper()),
-    //Pair("ChRef", null),
-    //Pair("Hiera", null)
+    Pair("SeComp", SeCompMapper())
 )
 private lateinit var orchestrator: Orchestrator
 
@@ -148,7 +147,7 @@ private fun tryRunOnServer(server: String)
 
 private fun runServer(server: String)
 {
-    val params = server.split(',').toTypedArray()
+    val params = server.split(',').map { it.trim() }.toTypedArray()
     val process = ProcessBuilder(*params)
         .redirectError(Redirect.INHERIT)
         .start()
@@ -406,7 +405,7 @@ private fun interceptQueryErrorResponse(input: BufferedReader): UppaalError
     while (!throwaway.endsWith("}}"))
         throwaway.append(input.read().toChar())
 
-    return orchestrator.mapQueryError(UppaalError.fromJson(error.toString()))
+    return orchestrator.backMapQueryError(UppaalError.fromJson(error.toString()))
 }
 private fun generateQueryErrorResponse(error: UppaalError): String
     = "{\"res\":\"ok\",\"info\":{\"status\":\"E\",\"error\":$error,\"stat\":false,\"message\":\"${error.message.jsonFy()}\",\"result\":\"\",\"plots\":[],\"cyclelen\":0,\"trace\":null}}"
@@ -470,7 +469,7 @@ private fun runDebug(server: String, inputFile: File, outputFile: File, errorFil
 
 private fun usage()
 {
-    println("usage: uppaal_mapper MODE MAPPERS")
+    println("usage: ProtoSugar MODE MAPPERS")
     println("MODE: $FILE_TAG INPUT_XML_FILE_PATH [$OUTPUT_TAG OUTPUT_XML_FILE_PATH]")
     println("    | $SERVER_TAG SERVER_RUN_CMD")
     println("    | $DEBUG_TAG SERVER_RUN_CMD STDIN_OUTPUT_PATH STDOUT_OUTPUT_PATH STDERR_OUTPUT_PATH")

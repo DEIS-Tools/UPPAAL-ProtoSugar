@@ -9,7 +9,7 @@ import uppaal.error.UppaalError
 
 class TxQuanMapper : Mapper {
     override fun getPhases()
-        = PhaseOutput(sequenceOf(), null, TxQuanQueryPhase())
+        = PhaseOutput(listOf(), null, TxQuanQueryPhase())
 
     private class TxQuanQueryPhase : QueryPhase()
     {
@@ -27,7 +27,7 @@ class TxQuanMapper : Mapper {
             Pair(arrow,       "-->")
         )
 
-        private val queryGrammar = Confre("""
+        private val queryConfre = Confre("""
             Query :== [QueryQuantifier] Expression [('-->' | '$arrow') Expression] [Subjection] .
             QueryQuantifier :== ('A[]' | '$aBox')
                          | ('E<>' | '$eDiamond')
@@ -44,7 +44,7 @@ class TxQuanMapper : Mapper {
 
         override fun mapQuery(query: String): Pair<String, UppaalError?> {
             rewriter = Rewriter(query)
-            val result = queryGrammar.matchExact(query)?.let { smartMap(it) } ?: naiveMap(query)
+            val result = queryConfre.matchExact(query)?.let { smartMap(it) } ?: naiveMap(query)
             return Pair(result, null)
         }
 
@@ -100,7 +100,7 @@ class TxQuanMapper : Mapper {
         }
 
 
-        override fun mapQueryError(error: UppaalError): UppaalError {
+        override fun backMapQueryError(error: UppaalError): UppaalError {
             rewriter.backMapError(error)
             return error
         }

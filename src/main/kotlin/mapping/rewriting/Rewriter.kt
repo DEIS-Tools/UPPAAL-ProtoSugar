@@ -26,7 +26,7 @@ class Rewriter(val originalText: String) {
     private val appendOps = ArrayList<AppendOp>()
 
 
-    /** Insert 'text' at 'location', leaving the current symbol on 'location' after the inserted text.
+    /** Insert 'newText' at 'location', leaving the current symbol on 'location' after the inserted text.
      * Insert and replace operations may not overlap. **/
     fun insert(location: Int, newText: String): InsertOp {
         if (location !in (0 .. originalText.length))
@@ -41,7 +41,7 @@ class Rewriter(val originalText: String) {
         return op
     }
 
-    /** Swap a range of characters defined by 'range' with 'text'.
+    /** Swap a range of characters defined by 'range' with 'newText'.
      * Replace/replace and replace/insert operations may not overlap. **/
     fun replace(range: IntRange, newText: String): ReplaceOp {
         if (range.last < range.first)
@@ -56,7 +56,7 @@ class Rewriter(val originalText: String) {
         return op
     }
 
-    /** Append text at end of original text. Append operations cannot overlap with other operations.
+    /** Append 'newText' at end of original text. Append operations cannot overlap with other operations.
      * Insert operations at end of string are added before append operations. **/
     fun append(newText: String): AppendOp {
         val op = AppendOp(newText)

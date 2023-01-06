@@ -7,7 +7,7 @@ import kotlin.reflect.KType
 import kotlin.reflect.typeOf
 
 data class ProcessInfo(var name: String, val template: String)
-data class PhaseOutput(val modelPhases: Sequence<ModelPhase>, val simulatorPhase: SimulatorPhase?, val queryPhase: QueryPhase?)
+data class PhaseOutput(val modelPhases: List<ModelPhase>, val simulatorPhase: SimulatorPhase?, val queryPhase: QueryPhase?)
 
 
 interface Mapper {
@@ -28,23 +28,29 @@ abstract class ModelPhase {
     }
 
     /** This function delegates a UPPAAL element to all compatible handlers with a matching "path prefix". **/
-    inline fun <reified T : UppaalPojo> visit(path: UppaalPath, element: T): List<UppaalError> {
-        for (handler in handlers.filter { it.first == typeOf<T>() })
-            if (pathMatchesFilter(handler.second, path))
+    inline fun <reified T : UppaalPojo> visit(path: UppaalPath, element: T): List<UppaalError>
+        = handlers
+            .filter { handler ->
+                handler.first == typeOf<T>() && pathMatchesFilter(handler.second, path)
+            }.flatMap { handler ->
                 @Suppress("UNCHECKED_CAST")
-                return (handler.third as (UppaalPath, T) -> List<UppaalError>)(path, element)
-        return listOf()
-    }
-    fun pathMatchesFilter(pathFilter: List<Class<out UppaalPojo>>, path: UppaalPath)
-        = path.size >= pathFilter.size
-            && path.takeLast(pathFilter.size).zip(pathFilter).all {
-                (node, filter) -> filter.isInstance(node.element)
+                (handler.third as (UppaalPath, T) -> List<UppaalError>)(path, element)
             }
+
+    fun pathMatchesFilter(pathFilter: List<Class<out UppaalPojo>>, path: UppaalPath): Boolean {
+        if (pathFilter.isEmpty())
+            return true
+
+        return path.size >= pathFilter.size &&
+                path.takeLast(pathFilter.size).zip(pathFilter).all {
+                    (node, filter) -> filter.isInstance(node.element)
+                }
+    }
 
     /** Errors from the UPPAAL engine or mapper phases must be "mapped back" to the original text on which they belong.
      * Since this framework makes many rewrites to the input code, equally many "back-maps" are required to compensate.
      * It is recommended to use the "Rewriter" to perform all text-mutation and back-mapping. **/
-    abstract fun mapModelErrors(errors: List<UppaalError>): List<UppaalError>
+    abstract fun backMapModelErrors(errors: List<UppaalError>): List<UppaalError>
 }
 
 abstract class SimulatorPhase {
@@ -57,5 +63,5 @@ abstract class QueryPhase {
     abstract fun mapQuery(query: String): Pair<String, UppaalError?>
 
     /** Figure out where in the original query a message belongs. **/
-    abstract fun mapQueryError(error: UppaalError): UppaalError
+    abstract fun backMapQueryError(error: UppaalError): UppaalError
 }

@@ -88,7 +88,6 @@ class Orchestrator(private val mappers: List<Mapper>) {
         phase.visit(path, transition)
             .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(it), it.value) })
 
-
     fun mapModelErrors(engineErrors: List<UppaalError>, mapperErrors: List<UppaalError>): List<UppaalError> {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = modelPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
@@ -96,9 +95,11 @@ class Orchestrator(private val mappers: List<Mapper>) {
             // Each phase only maps errors with a larger phase index than itself. Errors with the same or lower index are
             // not affected by the rewrites performed in the current phase (A phase only "errors on" the original text).
             val (applicableErrors, delayedErrors) = errors.partition { it.phaseIndex > phase.phaseIndex }
-            phase.mapModelErrors(applicableErrors) + delayedErrors
+            phase.backMapModelErrors(applicableErrors) + delayedErrors
         }.sortedBy { it.phaseIndex } // Place ProtoSugar errors first
     }
+
+
     fun mapProcesses(processes: List<ProcessInfo>) {
         // Mapped in reverse order since the error is based on the last modelPhase's result
         val reversePhases = simulatorPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
@@ -116,10 +117,12 @@ class Orchestrator(private val mappers: List<Mapper>) {
         }
         return Pair(finalQuery, null)
     }
-    fun mapQueryError(error: UppaalError): UppaalError {
+    // TODO: Fix this and query phases so that only "older phases" actually back-map a query error. This isn't currently
+    //  a problem since the location of the error is not visible for queries, but this might change in the future.
+    fun backMapQueryError(error: UppaalError): UppaalError {
         // Mapped in reverse order since the error is based on the last queryPhase's result
         val reversePhases = queryPhases?.reversed() ?: throw Exception("You must upload a model before you run a query")
-        return reversePhases.fold(error) { innerError, phase -> phase.mapQueryError(innerError) }
+        return reversePhases.fold(error) { innerError, phase -> phase.backMapQueryError(innerError) }
     }
 
 

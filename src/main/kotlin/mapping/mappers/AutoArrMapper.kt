@@ -15,7 +15,7 @@ import uppaal.model.System
 
 class AutoArrMapper : Mapper {
     override fun getPhases()
-        = PhaseOutput(sequenceOf(Phase1()), null, null)
+        = PhaseOutput(listOf(Phase1()), null, null)
 
     private class Phase1 : ModelPhase() {
         private val arrayConfre = Confre(
@@ -26,6 +26,8 @@ class AutoArrMapper : Mapper {
         """.trimIndent())
 
         val rewriters = HashMap<String, Rewriter>()
+
+        // TODO: Store global constants so that they can be used in the scopes of templates.
 
 
         init {
@@ -68,7 +70,7 @@ class AutoArrMapper : Mapper {
 
                 val recurringErrors = HashSet<String>()
                 replaceOp.addBackMap()
-                    .activateOn(replacement.indices, ActivationRule.ACTIVATION_CONTAINS_ERROR) // On any array element
+                    .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR) // On any array element
                     .withPriority(1)
                     .overrideErrorRange { autoArr.children[7]!!.range() } // Place on original expression
                     .discardError { !recurringErrors.add(it.message) } // Discard if message seen before
@@ -95,7 +97,7 @@ class AutoArrMapper : Mapper {
         }
 
         private fun getDimensionSizes(autoArr: Node, code: String): List<Int?> {
-            val constInts = getConstantInts(code)
+            val constInts = getConstantInts(code) // TODO: Don't recompute constants everytime
             val sizes = (autoArr.children[2] as Node).children.map {
                 (it as Node).children[1].toString().toIntOrNull()
                     ?: constInts.find { const ->
@@ -175,7 +177,7 @@ class AutoArrMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>)
+        override fun backMapModelErrors(errors: List<UppaalError>)
             = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 }

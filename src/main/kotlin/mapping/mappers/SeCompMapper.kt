@@ -54,7 +54,7 @@ class SeCompMapper : Mapper {
         val subTemplateQueryMapInfo = HashMap<String, SubTemplateQueryMapInfo>()
 
         return PhaseOutput(
-            sequenceOf(
+            listOf(
                 IndexingPhase(freeTypedefs, constInts, subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine),
                 ReferenceCheckingPhase(subTemplates, baseSubTemplateUsers),
                 MappingPhase(subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine, subTemToParent, backMapOfBubbledUpProcesses)
@@ -388,7 +388,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>)
+        override fun backMapModelErrors(errors: List<UppaalError>)
             = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 
@@ -439,7 +439,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>) = errors
+        override fun backMapModelErrors(errors: List<UppaalError>) = errors
     }
 
     private class MappingPhase(
@@ -868,7 +868,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        override fun mapModelErrors(errors: List<UppaalError>)
+        override fun backMapModelErrors(errors: List<UppaalError>)
             = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 
@@ -1374,7 +1374,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        override fun mapQueryError(error: UppaalError): UppaalError {
+        override fun backMapQueryError(error: UppaalError): UppaalError {
             rewriter.backMapError(error)
             return error
         }
