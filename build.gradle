@@ -13,6 +13,8 @@ repositories {
 dependencies {
     testImplementation 'org.jetbrains.kotlin:kotlin-test'
     implementation group: 'org.simpleframework', name: 'simple-xml', version: '2.7.1'
+    implementation group: 'org.jetbrains.kotlinx', name: 'kotlinx-coroutines-core-jvm', version: '1.6.4'
+    implementation group: 'org.jetbrains.kotlinx', name: 'kotlinx-serialization-json', version: '1.5.0'
 }
 
 test {

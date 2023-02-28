@@ -1,9 +1,12 @@
-package mapping.mappers
+package mapping.impl
 
 import createOrGetRewriter
-import mapping.rewriting.ActivationRule
-import mapping.rewriting.BackMapResult
-import mapping.rewriting.Rewriter
+import mapping.mapping.Mapper
+import mapping.mapping.ModelPhase
+import mapping.mapping.PhaseOutput
+import mapping.restructuring.ActivationRule
+import mapping.restructuring.BackMapResult
+import mapping.restructuring.Rewriter
 import mapping.parsing.Confre
 import mapping.parsing.ConfreHelper
 import mapping.parsing.Node

@@ -5,7 +5,7 @@ import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text
 
 @Root(name = "name")
-class Name : UppaalPojo {
+open class Name : UppaalPojo {
     @field:Attribute(name = "x", required = false)
     var x: Int = 0
 
@@ -15,3 +15,5 @@ class Name : UppaalPojo {
     @field:Text(required = false)
     var content: String? = null
 }
+
+class SubTemplateName : Name()

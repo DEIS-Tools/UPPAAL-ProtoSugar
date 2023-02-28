@@ -1,11 +1,14 @@
-package mapping.mappers
+package mapping.impl
 
 import createOrGetRewriter
 import joinInsert
+import mapping.mapping.Mapper
+import mapping.mapping.ModelPhase
+import mapping.mapping.PhaseOutput
 import mapping.parsing.*
-import mapping.rewriting.ActivationRule
-import mapping.rewriting.BackMapResult
-import mapping.rewriting.Rewriter
+import mapping.restructuring.ActivationRule
+import mapping.restructuring.BackMapResult
+import mapping.restructuring.Rewriter
 import uppaal.error.UppaalError
 import uppaal.error.UppaalPath
 import uppaal.error.createUppaalError

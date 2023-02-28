@@ -1,6 +1,7 @@
 import uppaal.error.UppaalPath
-import mapping.rewriting.InsertOp
-import mapping.rewriting.Rewriter
+import mapping.restructuring.InsertOp
+import mapping.restructuring.Rewriter
+import java.io.File
 
 /** Escape all letters in terms of Json. (Does not handle syntax errors.) **/
 fun String.jsonFy() = this.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -50,3 +51,8 @@ fun Rewriter.joinInsert(location: Int, elements: List<String>, separator: String
 /** Create and add a new rewriter to a map of rewriters with "path-keys". Throws if path already has a rewriter. **/
 fun MutableMap<String, Rewriter>.createOrGetRewriter(path: UppaalPath, originalText: String): Rewriter
     = this.getOrPut(path.toString()) { Rewriter(originalText) }
+
+
+/** Print exception to a file. **/
+fun Exception.writeToFile(path: String)
+        = File(path).printWriter().use { out -> out.println(this.stackTraceToString()) }

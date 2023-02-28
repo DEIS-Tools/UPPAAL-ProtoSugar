@@ -1,6 +1,6 @@
 package mapping
 
-import mapping.mappers.*
+import mapping.mapping.*
 import uppaal.error.UppaalError
 import uppaal.error.UppaalPath
 import org.simpleframework.xml.Serializer
@@ -19,6 +19,8 @@ class Orchestrator(private val mappers: List<Mapper>) {
     private var modelPhases: ArrayList<ModelPhase>? = null
     private var simulatorPhases: List<SimulatorPhase>? = null
     private var queryPhases: List<QueryPhase>? = null
+
+    val numberOfMappers = mappers.size
 
 
     fun mapModel(stream: InputStream): Pair<String, List<UppaalError>>
@@ -100,7 +102,7 @@ class Orchestrator(private val mappers: List<Mapper>) {
     }
 
 
-    fun mapProcesses(processes: List<ProcessInfo>) {
+    fun mapProcesses(processes: MutableList<ProcessInfo>) {
         // Mapped in reverse order since the error is based on the last modelPhase's result
         val reversePhases = simulatorPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors")
         reversePhases.forEach { it.mapProcesses(processes) }

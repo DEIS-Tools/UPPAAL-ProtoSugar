@@ -22,7 +22,7 @@ data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine
             if (currentLine == beginLine && currentColumn == beginColumn)
                 startIndex = currentIndex
 
-            if (currentLine >= endLine && currentColumn == endColumn - 1)
+            if ((currentLine == endLine && currentColumn == endColumn - 1) || currentLine > endLine)
                 return IntRange(startIndex, currentIndex) // -1 to convert to inclusive end
 
             if (char == '\n') {
@@ -30,6 +30,10 @@ data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine
                 currentColumn = 0
             }
         }
+
+        // A last resort to not fail.
+        if (startIndex != -1)
+            return IntRange(startIndex, currentIndex)
 
         throw Exception("Could not convert $this to IntRange on text:\n$text")
     }

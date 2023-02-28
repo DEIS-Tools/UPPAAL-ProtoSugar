@@ -1,18 +1,10 @@
-package mapping.mappers
+package mapping.mapping
 
 import uppaal.error.UppaalError
 import uppaal.error.UppaalPath
 import uppaal.model.UppaalPojo
 import kotlin.reflect.KType
 import kotlin.reflect.typeOf
-
-data class ProcessInfo(var name: String, val template: String)
-data class PhaseOutput(val modelPhases: List<ModelPhase>, val simulatorPhase: SimulatorPhase?, val queryPhase: QueryPhase?)
-
-
-interface Mapper {
-    fun getPhases(): PhaseOutput
-}
 
 abstract class ModelPhase {
     /** Do not touch! Here be dragons! **/
@@ -29,13 +21,13 @@ abstract class ModelPhase {
 
     /** This function delegates a UPPAAL element to all compatible handlers with a matching "path prefix". **/
     inline fun <reified T : UppaalPojo> visit(path: UppaalPath, element: T): List<UppaalError>
-        = handlers
-            .filter { handler ->
-                handler.first == typeOf<T>() && pathMatchesFilter(handler.second, path)
-            }.flatMap { handler ->
-                @Suppress("UNCHECKED_CAST")
-                (handler.third as (UppaalPath, T) -> List<UppaalError>)(path, element)
-            }
+            = handlers
+        .filter { handler ->
+            handler.first == typeOf<T>() && pathMatchesFilter(handler.second, path)
+        }.flatMap { handler ->
+            @Suppress("UNCHECKED_CAST")
+            (handler.third as (UppaalPath, T) -> List<UppaalError>)(path, element)
+        }
 
     fun pathMatchesFilter(pathFilter: List<Class<out UppaalPojo>>, path: UppaalPath): Boolean {
         if (pathFilter.isEmpty())
@@ -43,7 +35,7 @@ abstract class ModelPhase {
 
         return path.size >= pathFilter.size &&
                 path.takeLast(pathFilter.size).zip(pathFilter).all {
-                    (node, filter) -> filter.isInstance(node.element)
+                        (node, filter) -> filter.isInstance(node.element)
                 }
     }
 
@@ -51,17 +43,4 @@ abstract class ModelPhase {
      * Since this framework makes many rewrites to the input code, equally many "back-maps" are required to compensate.
      * It is recommended to use the "Rewriter" to perform all text-mutation and back-mapping. **/
     abstract fun backMapModelErrors(errors: List<UppaalError>): List<UppaalError>
-}
-
-abstract class SimulatorPhase {
-    /** This function allows you to change the names of the processes shown in the UPPAAL simulator. **/
-    abstract fun mapProcesses(processes: List<ProcessInfo>)
-}
-
-abstract class QueryPhase {
-    /** Mutate a query. **/
-    abstract fun mapQuery(query: String): Pair<String, UppaalError?>
-
-    /** Figure out where in the original query a message belongs. **/
-    abstract fun backMapQueryError(error: UppaalError): UppaalError
 }

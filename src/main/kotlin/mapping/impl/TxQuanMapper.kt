@@ -1,10 +1,13 @@
-package mapping.mappers
+package mapping.impl
 
+import mapping.mapping.Mapper
+import mapping.mapping.PhaseOutput
+import mapping.mapping.QueryPhase
 import mapping.parsing.Confre
 import mapping.parsing.ConfreHelper
 import mapping.parsing.Leaf
 import mapping.parsing.ParseTree
-import mapping.rewriting.Rewriter
+import mapping.restructuring.Rewriter
 import uppaal.error.UppaalError
 
 class TxQuanMapper : Mapper {

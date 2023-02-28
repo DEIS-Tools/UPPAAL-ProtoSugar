@@ -1,4 +1,4 @@
-package mapping.rewriting
+package mapping.restructuring
 
 import length
 import uppaal.error.LineColumnRange

@@ -1,13 +1,14 @@
-package mapping.mappers
+package mapping.impl
 
 import ensureStartsWith
 import mapping.*
 import uppaal.error.*
-import mapping.rewriting.BackMapResult
-import mapping.rewriting.Rewriter
+import mapping.restructuring.BackMapResult
+import mapping.restructuring.Rewriter
 import createOrGetRewriter
+import mapping.mapping.*
 import mapping.parsing.*
-import mapping.rewriting.ActivationRule
+import mapping.restructuring.ActivationRule
 import uppaal.error.UppaalError
 import uppaal.error.UppaalErrorException
 import uppaal.error.UppaalPath
@@ -880,7 +881,7 @@ class SeCompMapper : Mapper {
         val backMapOfBubbledUpProcesses: HashMap<String, String>,
         val subTemplateQueryMapInfo: HashMap<String, SubTemplateQueryMapInfo>
     ) : SimulatorPhase() {
-        override fun mapProcesses(processes: List<ProcessInfo>) {
+        override fun mapProcesses(processes: MutableList<ProcessInfo>) {
             val subTemInstanceCount = HashMap<Pair<String, String>, Int>() // Parent instance name, SubTemplate name -> Sub template count
             val instanceToName = HashMap<InstanceSummary, String>() // Parent
 
@@ -983,7 +984,7 @@ class SeCompMapper : Mapper {
         override fun mapQuery(query: String): Pair<String, UppaalError?> {
             rewriter = Rewriter(query)
 
-            // This "instantiation" is delayed since 'backMapOfBubbledUpProcesses' is empty before mapping is done.
+            // This "instantiation" of baseNameToBubbledUpNames is delayed since 'backMapOfBubbledUpProcesses' is empty until this point
             if (baseNameToBubbledUpNames.isEmpty() && backMapOfBubbledUpProcesses.isNotEmpty())
                 for ((key, value) in backMapOfBubbledUpProcesses)
                     baseNameToBubbledUpNames[value] = key
@@ -1190,7 +1191,7 @@ class SeCompMapper : Mapper {
             var currentSubTemplateName: String? = null
             var subTemplatePathLength = 1
 
-            // Find the potentially references sub-template. Cannot be first, since this is the root user.
+            // Find the referenced sub-template if it exists. Cannot be first, since this is the root user.
             // Cannot be last since this is a location, variable, or function. Thus, we drop first and last.
             for (part in dotExpr.parts.drop(1).dropLast(1)) {
                 if (part.followedBy != FollowType.NOTHING) // If there is a [] or (), this cannot be a sub-tem reference
