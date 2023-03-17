@@ -1,15 +1,11 @@
 import kotlinx.coroutines.*
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.decodeFromStream
 import mapping.Orchestrator
 import mapping.impl.AutoArrMapper
 import mapping.impl.PaChaMapper
 import mapping.impl.SeCompMapper
 import mapping.impl.TxQuanMapper
 import mapping.interception.*
-import mapping.interception.mapping.MappingInterceptor
+import mapping.interception.MappingInterceptor
 import java.io.*
 import kotlin.io.path.Path
 import kotlin.io.path.pathString
@@ -27,17 +23,16 @@ private const val WITH_MAPPERS_TAG = "-with-mappers"
 private const val EXCEPTION_DUMP_PATH_TAG = "-exception-dump-dir"
 
 private val availableMappers = mapOf(
-    Pair("PaCha", PaChaMapper()),
-    Pair("AutoArr", AutoArrMapper()),
-    Pair("TxQuan", TxQuanMapper()),
-    Pair("SeComp", SeCompMapper())
+    Pair("PaCha") { PaChaMapper() },
+    Pair("AutoArr") { AutoArrMapper() },
+    Pair("TxQuan") { TxQuanMapper() },
+    Pair("SeComp") { SeCompMapper() }
 )
 
 private lateinit var tags: Map<String, List<String>>
 private lateinit var orchestrator: Orchestrator
 
 
-@OptIn(ExperimentalSerializationApi::class)
 fun main(args: Array<String>)
 {
     tags = parseTags(args)
@@ -51,7 +46,10 @@ fun main(args: Array<String>)
         }
     }
     catch (ex: Exception)
-    { ex.writeToFile(exceptionDumpPath()) }
+    {
+        ex.writeToFile(exceptionDumpPath())
+        println(ex)
+    }
 }
 
 private fun parseTags(args: Array<String>): Map<String, List<String>> {
@@ -68,7 +66,7 @@ private fun parseTags(args: Array<String>): Map<String, List<String>> {
 
     val modeTags = listOf(FILE_MODE_TAG, SERVER_MODE_TAG)
     if (tags.keys.count { it in modeTags } != 1) {
-        println("Only use one of the following: ${modeTags.joinToString { "'$it'" }}")
+        println("Use one of the following tags exactly once: ${modeTags.joinToString { "'$it'" }}")
         usage()
     }
 
@@ -85,7 +83,7 @@ private fun fileModeOutput() = (tags[OUTPUT_TAG]?.let { File(it.single()).output
 private fun serverModeLaunchCommand() = tags[SERVER_MODE_TAG]!!.single()
 private fun serverModeStreamDumpDir() = tags[STREAM_DUMP_DIR_TAG]?.single()
 private fun exceptionDumpPath() = tags[EXCEPTION_DUMP_PATH_TAG]?.single() ?: STD_EXCEPTION_DUMP_PATH
-private fun activeMappers() = tags[WITH_MAPPERS_TAG]?.map { availableMappers[it]!! } ?: listOf()
+private fun activeMappers() = tags[WITH_MAPPERS_TAG]?.map { availableMappers[it]?.invoke() ?: throw Exception("Invalid mapper name '$it'") } ?: listOf()
 
 
 private fun runFileMode(input: InputStream, output: BufferedWriter) {
@@ -106,6 +104,7 @@ private fun runServer(server: String, streamDumpDir: String?) {
 
     runInterceptors(doMapping, doStreamDump, streamDumpDir, process)
 }
+
 fun runInterceptors(doMapping: Boolean, doStreamDump: Boolean, streamDumpDir: String?, process: Process) = runBlocking {
     val interceptors =
         if (doMapping && doStreamDump) {
@@ -140,10 +139,9 @@ fun runInterceptors(doMapping: Boolean, doStreamDump: Boolean, streamDumpDir: St
         else
             listOf(async(Dispatchers.IO) { DoNothingInterceptor(InterceptStreams.fromProcess(process).single()).run() })
 
-    try
-    { awaitAll(*interceptors.toTypedArray()) }
+    try { awaitAll(*interceptors.toTypedArray()) }
     catch (ex: Exception)
-    { ex.writeToFile(STD_EXCEPTION_DUMP_PATH) }
+    { ex.writeToFile(exceptionDumpPath()) }
 }
 
 

@@ -1,8 +1,8 @@
 package mapping.restructuring
 
 import length
-import uppaal.error.LineColumnRange
-import uppaal.error.UppaalError
+import uppaal.messaging.LineColumnRange
+import uppaal.messaging.UppaalMessage
 import offset
 import overlaps
 import within
@@ -14,7 +14,7 @@ import kotlin.Exception
  * (insert, replace, append), which are, at the call of 'rewriteText', all applied to the originalText in "text-location and chronological"-order.
  * Operations may not overlap. Overlapping operations must be done over multiple phases (multiple Rewriter instances).
  * The rewriter simultaneously constructs maps to help map UPPAAL errors in the mapped text back to the 'originalText'. **/
-class Rewriter(val originalText: String) {
+class TextRewriter(val originalText: String) {
     private var hasChanges = false
     private var rewrittenText = StringBuilder(originalText)
     private val simpleBackMaps = ArrayList<SimpleBackMap>()
@@ -100,7 +100,7 @@ class Rewriter(val originalText: String) {
     /** Attempt to map 'error' from the current location in mapped text to the "correct" location in the original text.
      * IMPORTANT: The back-mapper ONLY operates on the latest results (text + back-maps) from 'getRewrittenText()'! This
      * safeguards it from back-mapping using text/back-maps that CANNOT possibly exist in the submitted UPPAAL model. **/
-    fun backMapError(error: UppaalError): BackMapResult {
+    fun backMapError(error: UppaalMessage): BackMapResult {
         val errorIntRange = error.range.toIntRange(rewrittenText.toString())
 
         // Advanced back-mapping
@@ -239,23 +239,23 @@ class AdvancedBackMap(
     val priority: Int,
     private val range: IntRange,
     private val rule: ActivationRule,
-    private val pathFunction: Function<String, Pair<String, Rewriter>>?,
+    private val pathFunction: Function<String, Pair<String, TextRewriter>>?,
     private val rangeFunction: Function<IntRange, IntRange>,
     private val messageFunction: Function<String, String>?,
     private val contextFunction: Function<String, String>?,
-    private val discardCondition: Predicate<UppaalError>?
+    private val discardCondition: Predicate<UppaalMessage>?
 ) {
     /** Based on the in-rewritten-text range of a UPPAAL error, determine if this back-map applies to said error. **/
     fun appliesTo(errorRange: IntRange): Boolean = rule.passesActivation(range, errorRange)
 
-    fun apply(error: UppaalError, sourceRewriter: Rewriter): BackMapResult {
+    fun apply(error: UppaalMessage, sourceTextRewriter: TextRewriter): BackMapResult {
         if (discardCondition?.test(error) == true)
             return BackMapResult.REQUEST_DISCARD
 
-        val (targetPath, targetRewriter) = pathFunction?.apply(error.path) ?: Pair(error.path, sourceRewriter)
+        val (targetPath, targetRewriter) = pathFunction?.apply(error.path) ?: Pair(error.path, sourceTextRewriter)
         error.path = targetPath
 
-        val sourceRange = error.range.toIntRange(sourceRewriter.getRewrittenText())
+        val sourceRange = error.range.toIntRange(sourceTextRewriter.getRewrittenText())
         val targetRange = rangeFunction.apply(sourceRange)
         if (!targetRange.within(targetRewriter.originalText.indices))
             throw Exception("Advanced back-map returned invalid range [${targetRange.first}; ${targetRange.last}]. Original text range was [${targetRewriter.originalText.indices.first}; ${targetRewriter.originalText.indices.last}].")
@@ -276,11 +276,11 @@ interface IAdvancedBackMapBuilder {
     fun activateOn(range: IntRange, rule: ActivationRule): IAdvancedBackMapBuilder
     fun activateOn(rule: ActivationRule): IAdvancedBackMapBuilder
     fun withPriority(priority: Int): IAdvancedBackMapBuilder
-    fun overrideErrorPath(pathFunction: Function<String, Pair<String, Rewriter>>): IAdvancedBackMapBuilder
+    fun overrideErrorPath(pathFunction: Function<String, Pair<String, TextRewriter>>): IAdvancedBackMapBuilder
     fun overrideErrorRange(rangeFunction: Function<IntRange, IntRange>): IAdvancedBackMapBuilder
     fun overrideErrorMessage(messageFunction: Function<String, String>): IAdvancedBackMapBuilder
     fun overrideErrorContext(contextFunction: Function<String, String>): IAdvancedBackMapBuilder
-    fun discardError(condition: Predicate<UppaalError> = Predicate { true }): IAdvancedBackMapBuilder
+    fun discardError(condition: Predicate<UppaalMessage> = Predicate { true }): IAdvancedBackMapBuilder
 }
 
 /** The full builder interface for AdvancedBackMaps. By default, the priority is zero and the mapper activates on UPPAAL
@@ -291,11 +291,11 @@ class AdvancedBackMapBuilder(private val operation: Operation): IAdvancedBackMap
     private var activationRule = ActivationRule.EXACT
     private var priority = 0
 
-    private var pathFunction: Function<String, Pair<String, Rewriter>>? = null
+    private var pathFunction: Function<String, Pair<String, TextRewriter>>? = null
     private var rangeFunction: Function<IntRange, IntRange>? = null
     private var messageFunction: Function<String, String>? = null
     private var contextFunction: Function<String, String>? = null
-    private var discardCondition: Predicate<UppaalError>? = null
+    private var discardCondition: Predicate<UppaalMessage>? = null
 
 
     /** Set the text range and rule for when the back-map should activate for a UPPAAL error.
@@ -322,7 +322,7 @@ class AdvancedBackMapBuilder(private val operation: Operation): IAdvancedBackMap
     /** The 'pathFunction' takes as input the in-rewritten-model path of the current UPPAAL error. User-code can
      * optionally use this input to generate the new in-original-model path.
      * The 'pathFunction' outputs both "the new path" AND "a rewriter for the text in the new path" **/
-    override fun overrideErrorPath(pathFunction: Function<String, Pair<String, Rewriter>>): IAdvancedBackMapBuilder {
+    override fun overrideErrorPath(pathFunction: Function<String, Pair<String, TextRewriter>>): IAdvancedBackMapBuilder {
         this.pathFunction = pathFunction
         return this
     }
@@ -351,7 +351,7 @@ class AdvancedBackMapBuilder(private val operation: Operation): IAdvancedBackMap
 
     /** Some errors may not be desirable to "let through" to the GUI. All UPPAAL errors that this AdvancedBackMap
      * applies to will be discarded if the supplied 'condition' returns 'true' (default 'condition' is always true). **/
-    override fun discardError(condition: Predicate<UppaalError>): IAdvancedBackMapBuilder {
+    override fun discardError(condition: Predicate<UppaalMessage>): IAdvancedBackMapBuilder {
         this.discardCondition = condition
         return this
     }

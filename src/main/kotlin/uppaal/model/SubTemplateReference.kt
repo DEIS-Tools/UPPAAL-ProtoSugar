@@ -14,7 +14,7 @@ class SubTemplateReference : UppaalPojo {
     var subtemplatename: SubTemplateName? = null
 
     @field:ElementList(name = "boundarypoint", required = false, inline = true)
-    var boundarypoints: MutableList<Location> = ArrayList()
+    var boundarypoints: MutableList<BoundaryPoint> = ArrayList()
 
     @field:Attribute(name = "x")
     var x: Int = 0

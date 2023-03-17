@@ -39,4 +39,9 @@ class BufferedIterator<T>(private val iterator: Iterator<T>) {
         current = iterator.next()
         return current!!
     }
+
+    fun tryNext(): T? {
+        return if (hasNext()) next()
+            else null
+    }
 }

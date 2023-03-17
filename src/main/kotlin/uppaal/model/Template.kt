@@ -17,7 +17,13 @@ class Template : UppaalPojo {
     var locations: MutableList<Location> = ArrayList()
 
     @field:ElementList(name = "branchpoint", required = false, inline = true)
-    var branchpoint: MutableList<Branchpoint> = ArrayList()
+    var branchpoints: MutableList<Branchpoint> = ArrayList()
+
+    @field:ElementList(name = "boundarypoint", required = false, inline = true)
+    var boundarypoints: MutableList<BoundaryPoint> = ArrayList()
+
+    @field:ElementList(name = "subtemplatereference", required = false, inline = true)
+    var subtemplatereferences: MutableList<SubTemplateReference> = ArrayList()
 
     @field:Element(name = "init", required = false)
     var init: Init? = null

@@ -1,6 +1,8 @@
-import uppaal.error.UppaalPath
+import kotlinx.serialization.json.*
+import uppaal.messaging.UppaalPath
 import mapping.restructuring.InsertOp
-import mapping.restructuring.Rewriter
+import mapping.restructuring.TextRewriter
+import java.io.BufferedWriter
 import java.io.File
 
 /** Escape all letters in terms of Json. (Does not handle syntax errors.) **/
@@ -36,7 +38,7 @@ fun List<Int>.product(): Int
 /** Works similar to 'String.joinToString()'. It takes an insertion-'location', a list of string 'elements' to insert,
  * and an optional 'separator' string to insert between any two adjacent elements.
  * The output is a list of 'InsertOp' objects for each element in 'elements' (not for the 'separator' elements). **/
-fun Rewriter.joinInsert(location: Int, elements: List<String>, separator: String = ", "): Sequence<IndexedValue<InsertOp>> =
+fun TextRewriter.joinInsert(location: Int, elements: List<String>, separator: String = ", "): Sequence<IndexedValue<InsertOp>> =
     sequence {
         val args = elements.withIndex().iterator()
         while (args.hasNext()) {
@@ -49,10 +51,32 @@ fun Rewriter.joinInsert(location: Int, elements: List<String>, separator: String
 
 
 /** Create and add a new rewriter to a map of rewriters with "path-keys". Throws if path already has a rewriter. **/
-fun MutableMap<String, Rewriter>.createOrGetRewriter(path: UppaalPath, originalText: String): Rewriter
-    = this.getOrPut(path.toString()) { Rewriter(originalText) }
+fun MutableMap<String, TextRewriter>.createOrGetRewriter(path: UppaalPath, originalText: String): TextRewriter
+    = this.getOrPut(path.toString()) { TextRewriter(originalText) }
 
 
 /** Print exception to a file. **/
 fun Exception.writeToFile(path: String)
         = File(path).printWriter().use { out -> out.println(this.stackTraceToString()) }
+
+/** Write value to BufferedWriter and flush. **/
+fun BufferedWriter.writeAndFlush(str: String) { write(str); flush() }
+fun BufferedWriter.writeAndFlush(char: Char) { write(char.code); flush() }
+
+
+/** Replace the value on a JsonObject for a specific key-path **/
+fun JsonObject.replaceValue(key: List<String>, newValue: JsonElement): JsonObject = buildJsonObject {
+    this@replaceValue.entries.forEach {
+        if (it.key == key[0])
+            put(it.key, if (key.size == 1) newValue else it.value.jsonObject.replaceValue(key.drop(1), newValue))
+        else
+            put(it.key, it.value)
+    }
+}
+
+/** Replace "\r", "\n" with their actual characters. **/
+fun String.unescapeLinebreaks(): String =
+    if (!this.contains('\\')) this
+    else this.replace("\\n", "\n")
+        .replace("\\r", "\r")
+

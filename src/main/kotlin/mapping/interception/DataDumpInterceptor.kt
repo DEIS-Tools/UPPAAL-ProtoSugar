@@ -10,12 +10,12 @@ class DataDumpInterceptor(
     errorStreamFile: String
 ) : Interceptor()
 {
-    private val inInput = streams.inInput
-    private val inOutput = streams.inOutput
-    private val outInput = streams.outInput
-    private val outOutput = streams.outOutput
-    private val errInput = streams.errInput
-    private val errOutput = streams.errOutput
+    private val inInput = streams.inInput.bufferedReader()
+    private val inOutput = streams.inOutput.bufferedWriter()
+    private val outInput = streams.outInput.bufferedReader()
+    private val outOutput = streams.outOutput.bufferedWriter()
+    private val errInput = streams.errInput.bufferedReader()
+    private val errOutput = streams.errOutput.bufferedWriter()
 
     private val toChildFile: BufferedWriter = File(inputStreamFile).outputStream().bufferedWriter()
     private val toParentFile: BufferedWriter = File(outputStreamFile).outputStream().bufferedWriter()

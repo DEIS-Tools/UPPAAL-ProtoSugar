@@ -2,16 +2,18 @@ package mapping.interception
 
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.InputStream
+import java.io.OutputStream
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
 
 class InterceptStreams private constructor(
-    val inInput: BufferedReader,   // Parent -> Interceptor
-    val inOutput: BufferedWriter,  // Interceptor -> Child
-    val outInput: BufferedReader,  // Child -> Interceptor
-    val outOutput: BufferedWriter, // Interceptor -> Parent
-    val errInput: BufferedReader,  // Child -> Interceptor
-    val errOutput: BufferedWriter  // Interceptor -> Parent
+    val inInput: InputStream,   // Parent -> Interceptor
+    val inOutput: OutputStream,  // Interceptor -> Child
+    val outInput: InputStream,  // Child -> Interceptor
+    val outOutput: OutputStream, // Interceptor -> Parent
+    val errInput: InputStream,  // Child -> Interceptor
+    val errOutput: OutputStream  // Interceptor -> Parent
 ) {
     companion object {
         @JvmStatic
@@ -19,29 +21,29 @@ class InterceptStreams private constructor(
             val streams = ArrayList<InterceptStreams>()
 
             var inInput = System.`in`
-            var outInput = process.inputStream
-            var errInput = process.errorStream
+            var outOutput: OutputStream = System.out
+            var errOutput: OutputStream = System.err
 
             for (i in 1 until levels) {
                 val inOutput = PipedOutputStream()
-                val outOutput = PipedOutputStream()
-                val errOutput = PipedOutputStream()
+                val outInput = PipedInputStream()
+                val errInput = PipedInputStream()
 
                 streams.add(InterceptStreams(
-                    inInput.bufferedReader(), inOutput.bufferedWriter(),
-                    outInput.bufferedReader(), outOutput.bufferedWriter(),
-                    errInput.bufferedReader(), errOutput.bufferedWriter()
+                    inInput, inOutput,
+                    outInput, outOutput,
+                    errInput, errOutput
                 ))
 
                 inInput = PipedInputStream(inOutput)
-                outInput = PipedInputStream(outOutput)
-                errInput = PipedInputStream(errOutput)
+                outOutput = PipedOutputStream(outInput)
+                errOutput = PipedOutputStream(errInput)
             }
 
             streams.add(InterceptStreams(
-                inInput.bufferedReader(), process.outputStream.bufferedWriter(),
-                outInput.bufferedReader(), System.out.bufferedWriter(),
-                errInput.bufferedReader(), System.err.bufferedWriter()
+                inInput, process.outputStream,
+                process.inputStream, outOutput,
+                process.errorStream, errOutput
             ))
 
             return streams

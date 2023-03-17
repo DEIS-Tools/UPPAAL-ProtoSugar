@@ -1,4 +1,4 @@
-package uppaal.error
+package uppaal.messaging
 
 import java.lang.Exception
 

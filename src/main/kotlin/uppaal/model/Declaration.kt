@@ -4,7 +4,7 @@ import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text
 
 @Root(name = "declaration")
-class Declaration : UppaalPojo {
+class Declaration : TextUppaalPojo {
     @field:Text()
-    lateinit var content: String
+    override var content: String = ""
 }

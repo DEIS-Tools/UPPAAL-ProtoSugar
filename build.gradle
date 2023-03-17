@@ -1,10 +1,11 @@
 plugins {
     id 'org.jetbrains.kotlin.jvm' version '1.7.20'
+    id 'org.jetbrains.kotlin.plugin.serialization' version '1.7.20'
     id 'application'
 }
 
 group = 'org.uppaal.protosugar'
-version = '1.0.0'
+version = '1.2.0'
 
 repositories {
     mavenCentral()

@@ -5,7 +5,7 @@ import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text
 
 @Root(name = "label")
-class Label() : UppaalPojo {
+class Label() : TextUppaalPojo {
     @field:Attribute(name = "kind")
     lateinit var kind: String
 
@@ -16,7 +16,7 @@ class Label() : UppaalPojo {
     var y: Int = 0
 
     @field:Text
-    lateinit var content: String
+    override var content: String = ""
 
     constructor(initKind: String, initX: Int, initY: Int) : this() {
         kind = initKind
@@ -24,4 +24,6 @@ class Label() : UppaalPojo {
         y = initY
         content = ""
     }
+
+    override fun toString() = "$kind: ${content ?: ""}"
 }

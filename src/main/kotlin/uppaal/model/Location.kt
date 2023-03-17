@@ -20,7 +20,7 @@ class Location : UppaalPojo {
     var name: Name? = null
 
     @field:ElementList(name = "label", required = false, inline = true)
-    var labels: List<Label> = ArrayList()
+    var labels: MutableList<Label> = ArrayList()
 
     @field:Element(name = "urgent", required = false)
     var urgent: Urgent? = null

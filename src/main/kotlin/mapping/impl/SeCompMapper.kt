@@ -2,17 +2,17 @@ package mapping.impl
 
 import ensureStartsWith
 import mapping.*
-import uppaal.error.*
+import uppaal.messaging.*
 import mapping.restructuring.BackMapResult
-import mapping.restructuring.Rewriter
+import mapping.restructuring.TextRewriter
 import createOrGetRewriter
 import mapping.mapping.*
 import mapping.parsing.*
 import mapping.restructuring.ActivationRule
-import uppaal.error.UppaalError
-import uppaal.error.UppaalErrorException
-import uppaal.error.UppaalPath
-import uppaal.error.createUppaalError
+import uppaal.messaging.UppaalMessage
+import uppaal.messaging.UppaalMessageException
+import uppaal.messaging.UppaalPath
+import uppaal.messaging.createUppaalError
 import uppaal.model.*
 import offset
 import product
@@ -22,7 +22,7 @@ import java.util.Stack
 const val SUB_TEMPLATE_NAME_PREFIX = "__"
 const val SUB_TEMPLATE_USAGE_CLAMP = "::"
 
-class SeCompMapper : Mapper {
+class SeCompMapper : Mapper() {
     private data class LocationSummary(val id: String, val name: String?)
     private data class SubTemplateInfo(val entryLocation: LocationSummary?, val exitLocations: List<LocationSummary>, val subTemplateName: String, var isFaulty: Boolean = false)
     private data class SubTemplateUsage(val insertLocationId: String, val subTemplateName: String, val subTemInstanceName: String?, val originalLocationText: String)
@@ -89,7 +89,7 @@ class SeCompMapper : Mapper {
             Param :== ['const'] ('int' '[' (INT | IDENT) ',' (INT | IDENT) ']' | 'scalar' '[' (INT | IDENT) ']' | IDENT) IDENT .
         """.trimIndent())
 
-        private val rewriters = HashMap<String, Rewriter>()
+        private val rewriters = HashMap<String, TextRewriter>()
 
 
         init {
@@ -100,20 +100,20 @@ class SeCompMapper : Mapper {
 
 
         @Suppress("UNUSED_PARAMETER")
-        private fun indexGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
+        private fun indexGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalMessage> {
             registerTypedefsAndConstants(declaration.content)
             return listOf()
         }
 
         /** Register a template as a "sub-template" and/or "sub-template USER". Note all information about which and
          * how many sub-templates are used and check if sub-templates are structured correctly. **/
-        private fun indexTemplate(path: UppaalPath, template: Template): List<UppaalError> {
+        private fun indexTemplate(path: UppaalPath, template: Template): List<UppaalMessage> {
             val temName = template.name.content ?: return listOf(
                 createUppaalError(
                 path, "Template has no name.", true
             )
             )
-            val errors = ArrayList<UppaalError>()
+            val errors = ArrayList<UppaalMessage>()
 
             // Register as sub-template
             if (temName.startsWith(SUB_TEMPLATE_NAME_PREFIX)) {
@@ -233,8 +233,8 @@ class SeCompMapper : Mapper {
         }
 
         /** Find the (transitive) structure of partial instantiations and which are actually instantiated on the system line. **/
-        private fun indexSystem(path: UppaalPath, system: System): List<UppaalError> {
-            val errors = ArrayList<UppaalError>()
+        private fun indexSystem(path: UppaalPath, system: System): List<UppaalMessage> {
+            val errors = ArrayList<UppaalMessage>()
             registerTypedefsAndConstants(system.content)
 
             // Register (transitive) relationships (if any) between partial instantiations and templates that use sub-templates
@@ -243,16 +243,16 @@ class SeCompMapper : Mapper {
                 if (subTemplates.containsKey(baseName))
                     errors.add(
                         createUppaalError(
-                        path, system.content, tree.children[3]!!.range(), "Sub-templates cannot be instantiated by user-code.", true
+                        path, system.content, tree.children[3]!!.range, "Sub-templates cannot be instantiated by user-code.", true
                     )
                     )
                 else if (numSubTemplateUsers.containsKey(baseName)) {
                     val parameterValueRanges =
                         if (tree.children[1]?.isNotBlank() == true) {
                             val parameters = system.content
-                                .substring(tree.children[1]!!.range())
+                                .substring(tree.children[1]!!.range)
                                 .drop(1).dropLast(1)
-                            getParameterRanges(parameters, path, system.content, tree.children[1]!!.range(), errors)
+                            getParameterRanges(parameters, path, system.content, tree.children[1]!!.range, errors)
                         }
                         else listOf()
 
@@ -274,19 +274,19 @@ class SeCompMapper : Mapper {
                         path, system.content, subTemplateIdentNode, "Sub-templates cannot be instantiated by user-code.", true
                     )
                     )
-                systemLine.putAll(identNodes.map { Pair(it.toString(), it.range()) }.filter { numSubTemplateUsers.containsKey(it.first) })
+                systemLine.putAll(identNodes.map { Pair(it.toString(), it.range) }.filter { numSubTemplateUsers.containsKey(it.first) })
             }
 
             return errors
         }
 
 
-        private fun getParameterRanges(parameters: String, parameterPath: UppaalPath, errors: ArrayList<UppaalError>): ArrayList<FreeParameter?>
+        private fun getParameterRanges(parameters: String, parameterPath: UppaalPath, errors: ArrayList<UppaalMessage>): ArrayList<FreeParameter?>
             = getParameterRanges(parameters, parameterPath, parameters, parameters.indices, errors)
 
         /** For each parameter in a template or partial instantiation, try to get the range of values a free instantiation
          * would produce. E.g., the parameter "const int[0,5] ID" would produce numbers in the range (0 .. 5) **/
-        private fun getParameterRanges(parameters: String?, parameterPath: UppaalPath, fullText: String, parameterIndices: IntRange, errors: ArrayList<UppaalError>): ArrayList<FreeParameter?> {
+        private fun getParameterRanges(parameters: String?, parameterPath: UppaalPath, fullText: String, parameterIndices: IntRange, errors: ArrayList<UppaalMessage>): ArrayList<FreeParameter?> {
             val parameterRanges = ArrayList<FreeParameter?>()
             for (param in getParameters(parameters).withIndex()) {
                 val paramTree = freelyInstantiableParameterGrammar.matchExact(param.value) as? Node
@@ -385,11 +385,11 @@ class SeCompMapper : Mapper {
                         getRangeFromBoundedIntType(definition)?.let { freeTypedefs[name] = it }
                 }
                 else
-                    constInts[pair.second.children[3].toString()] = code.substring(pair.second.children[5]!!.range()).toIntOrNull() ?: continue
+                    constInts[pair.second.children[3].toString()] = code.substring(pair.second.children[5]!!.range).toIntOrNull() ?: continue
         }
 
 
-        override fun backMapModelErrors(errors: List<UppaalError>)
+        override fun backMapModelErrors(errors: List<UppaalMessage>)
             = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 
@@ -403,8 +403,8 @@ class SeCompMapper : Mapper {
 
 
         /** Simply check if there are any obvious (logic) errors on a template wrt. SeComp. **/
-        private fun verifyTemplate(path: UppaalPath, template: Template): List<UppaalError> {
-            val errors = ArrayList<UppaalError>()
+        private fun verifyTemplate(path: UppaalPath, template: Template): List<UppaalMessage> {
+            val errors = ArrayList<UppaalMessage>()
             val templateName = template.name.content ?: return listOf()
             val subTemUsages = baseSubTemplateUsers[templateName] ?: return listOf()
 
@@ -424,7 +424,7 @@ class SeCompMapper : Mapper {
 
         /** If two sub-templates (transitively) includes each other, this would result in infinite instances. This
          * function thus checks for this and reports an error if circular inclusion is detected. **/
-        private fun checkCircularUse(path: UppaalPath, branch: List<String>): List<UppaalError> {
+        private fun checkCircularUse(path: UppaalPath, branch: List<String>): List<UppaalMessage> {
             if (branch.size != branch.distinct().size)
                 return if (branch.last() == branch.first()) // If cycle pertains to root template
                     listOf(
@@ -440,7 +440,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        override fun backMapModelErrors(errors: List<UppaalError>) = errors
+        override fun backMapModelErrors(errors: List<UppaalMessage>) = errors
     }
 
     private class MappingPhase(
@@ -453,7 +453,7 @@ class SeCompMapper : Mapper {
     ) : ModelPhase() {
         private val totalNumInstances = HashMap<String, Int>() // Any-template name -> instance count
 
-        private val rewriters = HashMap<String, Rewriter>()
+        private val rewriters = HashMap<String, TextRewriter>()
 
 
         init {
@@ -464,7 +464,7 @@ class SeCompMapper : Mapper {
 
 
         /** Adds global variables to control which sub-templates are active/inactive. **/
-        private fun mapGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalError> {
+        private fun mapGlobalDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalMessage> {
             findTotalNumbersOfInstances()
 
             val nextSubTemIndex = HashMap<String, Int>()
@@ -564,7 +564,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        private fun mapTemplate(path: UppaalPath, template: Template): List<UppaalError> {
+        private fun mapTemplate(path: UppaalPath, template: Template): List<UppaalMessage> {
             if (!totalNumInstances.containsKey(template.name.content))
                 return listOf()
 
@@ -686,7 +686,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        private fun mapSystem(path: UppaalPath, system: System): List<UppaalError> {
+        private fun mapSystem(path: UppaalPath, system: System): List<UppaalMessage> {
             val systemLineNode = ConfreHelper.systemLineConfre.find(system.content) as? Node
                 ?: return listOf(createUppaalError(path, system.content, IntRange(system.content.length, system.content.length), "Missing 'system' line at end of system declarations.", true))
 
@@ -694,7 +694,7 @@ class SeCompMapper : Mapper {
             val rewriter = rewriters.createOrGetRewriter(path, system.content)
 
             // Map all partial instantiations
-            val errors = ArrayList<UppaalError>()
+            val errors = ArrayList<UppaalMessage>()
             for (tree in ConfreHelper.partialInstantiationConfre.findAll(rewriter.originalText).map { it as Node }) {
                 val lhsName = tree.children[0]!!.toString()
                 val rootStartIndex = getRootStartIndex(lhsName)
@@ -794,9 +794,9 @@ class SeCompMapper : Mapper {
          * since that parameter is not "free" and thus hinders the (partial) template from being instantiated otherwise. **/
         private fun bubbleUp(
             instantiationInfo: FreeInstantiation,
-            errors: ArrayList<UppaalError>,
+            errors: ArrayList<UppaalMessage>,
             path: UppaalPath,
-            rewriter: Rewriter,
+            textRewriter: TextRewriter,
             lhsName: String,
             nextRootIndex: Int,
             systemLineStartIndex: Int
@@ -804,7 +804,7 @@ class SeCompMapper : Mapper {
             if (null in instantiationInfo.parameters) {
                 errors += createUppaalError(
                     path,
-                    rewriter.originalText,
+                    textRewriter.originalText,
                     systemLine[lhsName]!!,
                     "The SeComp mapper cannot determine the number of instances of this system based on it's parameters."
                 )
@@ -821,8 +821,8 @@ class SeCompMapper : Mapper {
                 .plus(generateUserIndexExpression(instantiationInfo.parameters, nextRootIndex))
                 .joinToString()
 
-            rewriter.insert(systemLineStartIndex, "${lhsPrimeName}($lhsParameters) = $lhsName($rhsArguments);\n")
-            rewriter.replace(systemLine[lhsName]!!, lhsPrimeName)
+            textRewriter.insert(systemLineStartIndex, "${lhsPrimeName}($lhsParameters) = $lhsName($rhsArguments);\n")
+            textRewriter.replace(systemLine[lhsName]!!, lhsPrimeName)
                 .addBackMap()
                 .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
                 .overrideErrorRange { systemLine[lhsName]!! }
@@ -869,7 +869,7 @@ class SeCompMapper : Mapper {
         }
 
 
-        override fun backMapModelErrors(errors: List<UppaalError>)
+        override fun backMapModelErrors(errors: List<UppaalMessage>)
             = errors.filter { rewriters[it.path]?.backMapError(it) != BackMapResult.REQUEST_DISCARD }
     }
 
@@ -881,7 +881,7 @@ class SeCompMapper : Mapper {
         val backMapOfBubbledUpProcesses: HashMap<String, String>,
         val subTemplateQueryMapInfo: HashMap<String, SubTemplateQueryMapInfo>
     ) : SimulatorPhase() {
-        override fun mapProcesses(processes: MutableList<ProcessInfo>) {
+        override fun mapInitialSystem(processes: MutableList<ProcessInfo>, variables: MutableList<String>, clocks: MutableList<String>) {
             val subTemInstanceCount = HashMap<Pair<String, String>, Int>() // Parent instance name, SubTemplate name -> Sub template count
             val instanceToName = HashMap<InstanceSummary, String>() // Parent
 
@@ -977,35 +977,32 @@ class SeCompMapper : Mapper {
         data class SubTemplateRef(val dotExprSubTemplatePathLength: Int, val info: SubTemplateInfo)
 
 
-        private val queryExprConfre = Confre(ConfreHelper.queryExpressionGrammar)
-        private var rewriter = Rewriter("")
+        private val queryExprConfre = Confre(ConfreHelper.expressionGrammar)
 
 
-        override fun mapQuery(query: String): Pair<String, UppaalError?> {
-            rewriter = Rewriter(query)
-
+        override fun mapQuery(queryRewriter: TextRewriter): String {
             // This "instantiation" of baseNameToBubbledUpNames is delayed since 'backMapOfBubbledUpProcesses' is empty until this point
             if (baseNameToBubbledUpNames.isEmpty() && backMapOfBubbledUpProcesses.isNotEmpty())
                 for ((key, value) in backMapOfBubbledUpProcesses)
                     baseNameToBubbledUpNames[value] = key
 
-            val error = try {
-                findDotExpressionContexts(query).firstNotNullOfOrNull { mapContextWithSideEffects(it) }
+            try {
+                findDotExpressionContexts(queryRewriter.originalText)
+                    .firstNotNullOfOrNull { mapContextWithSideEffects(queryRewriter, it) }
+                return queryRewriter.getRewrittenText()
             }
-            catch (ex: UppaalErrorException) {
-                ex.uppaalError
+            catch (ex: Exception) {
+                queryRewriter.getRewrittenText() // Always rewrite query for back-mapping.
+                throw ex
             }
-
-            // Always rewrite query for back-mapping.
-            return Pair(rewriter.getRewrittenText(), error)
         }
 
-        private fun findDotExpressionContexts(query: String): Sequence<QuantifierContext>
-            = queryExprConfre.findAll(query).map {
-                fullExpr -> findDotExpressionContexts(fullExpr, QuantifierContext(Pair("", QuantifierInfo(Pair(0,-1), QuantifierType.FORALL))))
+        private fun findDotExpressionContexts(originalQuery: String): Sequence<QuantifierContext>
+            = queryExprConfre.findAll(originalQuery).map {
+                fullExpr -> findDotExpressionContexts(originalQuery, fullExpr, QuantifierContext(Pair("", QuantifierInfo(Pair(0,-1), QuantifierType.FORALL))))
             }
 
-        private fun findDotExpressionContexts(expression: ParseTree, currentContext: QuantifierContext): QuantifierContext {
+        private fun findDotExpressionContexts(originalQuery: String, expression: ParseTree, currentContext: QuantifierContext): QuantifierContext {
             val treeIterator = TreeIterator(expression)
 
             treeIterator.next()
@@ -1019,7 +1016,7 @@ class SeCompMapper : Mapper {
                 }
 
                 if (isDotExprNode(currentNode))
-                    currentContext.dotExpressions.add(getDotExprFromNode(currentNode))
+                    currentContext.dotExpressions.add(getDotExprFromNode(originalQuery, currentNode))
                 else if (isQuantifierNode(currentNode)) {
                     val quantifierType = when (val quan = currentNode.children[0]!!.toString()) {
                         "forall" -> QuantifierType.FORALL
@@ -1029,12 +1026,12 @@ class SeCompMapper : Mapper {
                     }
 
                     val quanVarName = currentNode.children[2]!!.toString()
-                    val quanVarType = rewriter.originalText.substring(currentNode.children[4]!!.range())
+                    val quanVarType = originalQuery.substring(currentNode.children[4]!!.range)
 
                     val quanVarRange = freeTypedefs[quanVarType] ?: getRangeFromBoundedIntType(quanVarType)
                     val subContext = QuantifierContext(Pair(quanVarName, QuantifierInfo(quanVarRange, quantifierType)))
 
-                    currentContext.subContexts.add(findDotExpressionContexts(currentNode.children[6]!!, subContext))
+                    currentContext.subContexts.add(findDotExpressionContexts(originalQuery, currentNode.children[6]!!, subContext))
                 }
                 else {
                     if (!treeIterator.hasNext())
@@ -1067,23 +1064,23 @@ class SeCompMapper : Mapper {
         private fun isQuantifierNode(node: Node): Boolean
             = (node.grammar as? NonTerminalRef)?.nonTerminalName == "Quantifier"
 
-        private fun getDotExprFromNode(node: Node): DotExpr {
-            val fullRange = node.range()
+        private fun getDotExprFromNode(originalQuery: String, node: Node): DotExpr {
+            val fullRange = node.range
             val terms = listOf(node.children[0]!!.asNode()).plus( // Take the "root" terms in the dot expression
                 node.children[1]!!.asNode().children.map {
                     it!!.asNode().children[1]!!.asNode().children.first() as Node? // Take all (nullable) terms in the following "{'.' [ExtendedTerm]}"
-                        ?: throw UppaalErrorException(
+                        ?: throw UppaalMessageException(
                             createUppaalError(
-                            UppaalPath(), rewriter.originalText, node.range(), "Blank term in dot-expression '${rewriter.originalText.substring(node.range())}'", ""
+                            UppaalPath(), originalQuery, node.range, "Blank term in dot-expression '${originalQuery.substring(node.range)}'", ""
                         )
                         )
                 })
 
             val parts = terms.map { partNode ->
                 val baseName = partNode.children[0]!!.toString()
-                val nameRange = partNode.children[0]!!.range()
-                val (followedBy, argumentsOrIndices) = getArgumentsOrIndices(partNode)
-                val fullPartRange = partNode.range()
+                val nameRange = partNode.children[0]!!.range
+                val (followedBy, argumentsOrIndices) = getArgumentsOrIndices(originalQuery, partNode)
+                val fullPartRange = partNode.range
 
                 Part(baseName, nameRange, followedBy, argumentsOrIndices, fullPartRange)
             }
@@ -1091,18 +1088,18 @@ class SeCompMapper : Mapper {
             return DotExpr(parts, fullRange)
         }
 
-        private fun getArgumentsOrIndices(extendedTerm: Node): Pair<FollowType, List<Pair<String, IntRange>>> {
+        private fun getArgumentsOrIndices(originalQuery: String, extendedTerm: Node): Pair<FollowType, List<Pair<String, IntRange>>> {
             if (extendedTerm.children[1]!!.isBlank())
                 return Pair(FollowType.NOTHING, listOf())
 
             return when (val firstTokenFollowingName = extendedTerm.children[1]!!.tokens().first().value) {
-                "(" -> Pair(FollowType.ARGUMENTS, getArguments(extendedTerm.children[1]!!.asNode().children[0]!!.asNode().children[1]!!.asNode()))
-                "[" -> Pair(FollowType.SUBSCRIPTS, getIndices(extendedTerm.children[1]!!.asNode().children[0]!!.asNode()))
+                "(" -> Pair(FollowType.ARGUMENTS, getArguments(originalQuery, extendedTerm.children[1]!!.asNode().children[0]!!.asNode().children[1]!!.asNode()))
+                "[" -> Pair(FollowType.SUBSCRIPTS, getIndices(originalQuery, extendedTerm.children[1]!!.asNode().children[0]!!.asNode()))
                 else -> throw Exception("Unhandled character following term: '$firstTokenFollowingName'")
             }
         }
 
-        private fun getArguments(listOfArgumentNode: Node): List<Pair<String, IntRange>> {
+        private fun getArguments(originalQuery: String, listOfArgumentNode: Node): List<Pair<String, IntRange>> {
             if (listOfArgumentNode.isBlank())
                 return listOf()
 
@@ -1111,21 +1108,21 @@ class SeCompMapper : Mapper {
             )
 
             return argumentNodes.map { arg ->
-                val range = arg.range()
-                Pair(rewriter.originalText.substring(range), range)
+                val range = arg.range
+                Pair(originalQuery.substring(range), range)
             }
         }
 
-        private fun getIndices(subscriptListNode: Node): List<Pair<String, IntRange>>
+        private fun getIndices(originalQuery: String, subscriptListNode: Node): List<Pair<String, IntRange>>
             = subscriptListNode.children.filterNotNull()
                 .map { subscript ->
-                    val range = subscript.asNode().range()
-                    val value = rewriter.originalText.substring(range)
+                    val range = subscript.asNode().range
+                    val value = originalQuery.substring(range)
                     Pair(value, range)
                 }
 
 
-        private fun mapContextWithSideEffects(context: QuantifierContext, quantifierVars: LinkedHashMap<String, QuantifierInfo> = LinkedHashMap()): UppaalError? {
+        private fun mapContextWithSideEffects(queryRewriter: TextRewriter, context: QuantifierContext, quantifierVars: LinkedHashMap<String, QuantifierInfo> = LinkedHashMap()) {
             for (dotExpr in context.dotExpressions) {
                 val firstPart = dotExpr.parts[0]
                 if (firstPart.followedBy == FollowType.SUBSCRIPTS)
@@ -1134,7 +1131,7 @@ class SeCompMapper : Mapper {
                 // 2 parts => Just a normal "process.locationOrVariable"
                 if (dotExpr.parts.size == 2) {
                     if (baseNameToBubbledUpNames.containsKey(firstPart.identifier))
-                        rewriter.replace(firstPart.nameRange, baseNameToBubbledUpNames[firstPart.identifier]!!)
+                        queryRewriter.replace(firstPart.nameRange, baseNameToBubbledUpNames[firstPart.identifier]!!)
                             .addBackMap()
                             .activateOn(ActivationRule.ERROR_CONTAINS_ACTIVATION)
                             .overrideErrorRange { dotExpr.fullRange }
@@ -1151,15 +1148,15 @@ class SeCompMapper : Mapper {
                         .any { argument -> quantifierVars.containsKey(argument) }
 
                     if (referencesMultiple) {
-                        rewriter.replace(dotExpr.fullRange, mapMultiRefDotExpr(dotExpr, subTemRef, quantifierVars))
+                        queryRewriter.replace(dotExpr.fullRange, mapMultiRefDotExpr(queryRewriter.originalText, dotExpr, subTemRef, quantifierVars))
                             .addBackMap()
                             .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
                             .overrideErrorRange { dotExpr.fullRange }
                     }
                     else {
-                        val newDotExpr = mapDotExpr(dotExpr, subTemRef)
-                        val originalDotExpr = rewriter.originalText.substring(dotExpr.fullRange)
-                        rewriter.replace(dotExpr.fullRange, newDotExpr)
+                        val newDotExpr = mapDotExpr(queryRewriter.originalText, dotExpr, subTemRef)
+                        val originalDotExpr = queryRewriter.originalText.substring(dotExpr.fullRange)
+                        queryRewriter.replace(dotExpr.fullRange, newDotExpr)
                             .addBackMap()
                             .activateOn(ActivationRule.ACTIVATION_CONTAINS_ERROR)
                             .overrideErrorRange { dotExpr.fullRange }
@@ -1174,11 +1171,8 @@ class SeCompMapper : Mapper {
                 // If the range of a quantifier is null, the mapper simply could not determine this range.
                 // It will only become an error if the mapper requires this range for rewriting.
                 newQuantifierVars[subContext.quantifierVariable.first] = subContext.quantifierVariable.second
-                return mapContextWithSideEffects(subContext, newQuantifierVars)
-                    ?: continue
+                mapContextWithSideEffects(queryRewriter, subContext, newQuantifierVars)
             }
-
-            return null
 
             // TODO: Query for "Exit" state reachability is impossible with current mapping and multiple end states
             //  since we don't know which exit state was entered.
@@ -1213,8 +1207,8 @@ class SeCompMapper : Mapper {
             return SubTemplateRef(subTemplatePathLength, subTemplateInfo)
         }
 
-        private fun mapDotExpr(dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVarValues: HashMap<String, Int> = HashMap()): String {
-            val resolvedName = resolveSubProcessName(dotExpr, subTemRef, quantifierVarValues)
+        private fun mapDotExpr(originalQuery: String, dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVarValues: HashMap<String, Int> = HashMap()): String {
+            val resolvedName = resolveSubProcessName(originalQuery, dotExpr, subTemRef, quantifierVarValues)
             val subProcessInfo = subTemplateQueryMapInfo[resolvedName] ?: throw Exception("Cannot find info for process: '$resolvedName'")
 
             val resolvedDotExpr = "${subProcessInfo.nativeSubProcessName}." + dotExpr.parts.drop(subTemRef.dotExprSubTemplatePathLength).joinToString(".") {
@@ -1241,9 +1235,9 @@ class SeCompMapper : Mapper {
             // If the dotExpr references the/an exit location of the sub-template
             if (subProcessInfo.subTemplateInfo.exitLocations.any { loc -> loc.name == lastPart.identifier }) {
                 if (subProcessInfo.subTemplateInfo.exitLocations.size != 1)
-                    throw UppaalErrorException(
+                    throw UppaalMessageException(
                         createUppaalError(
-                        UppaalPath(), rewriter.originalText, dotExpr.fullRange, "SeComp mapper currently cannot query the reachability of an exist state on a sub-template with multiple exit states"
+                        UppaalPath(), originalQuery, dotExpr.fullRange, "SeComp mapper currently cannot query the reachability of an exist state on a sub-template with multiple exit states"
                     )
                     )
 
@@ -1261,13 +1255,13 @@ class SeCompMapper : Mapper {
             return resolvedDotExpr
         }
 
-        private fun mapMultiRefDotExpr(dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVars: LinkedHashMap<String, QuantifierInfo>): String {
+        private fun mapMultiRefDotExpr(originalQuery: String, dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVars: LinkedHashMap<String, QuantifierInfo>): String {
             // Find the quantifier variables that are important for determining
             val significantQuantifierVars = quantifierVars
                 .filter { quanVar -> dotExpr.parts[0].argumentsOrIndices.any { arg -> arg.first == quanVar.key } }
 
             val unfoldedExpressions = getAllQuantifierVarValueCombinations(significantQuantifierVars)
-                .map { varAlloc -> Pair(mapDotExpr(dotExpr, subTemRef, varAlloc), varAlloc) }
+                .map { varAlloc -> Pair(mapDotExpr(originalQuery, dotExpr, subTemRef, varAlloc), varAlloc) }
 
             val currentQuantifierType = quantifierVars.entries.last().value.quantifierType
             return if (currentQuantifierType == QuantifierType.SUM)
@@ -1285,7 +1279,7 @@ class SeCompMapper : Mapper {
 
         private fun getAllQuantifierVarValueCombinations(significantQuantifierVars: Map<String, QuantifierInfo>): Sequence<HashMap<String, Int>> = sequence {
             val values = LinkedHashMap(significantQuantifierVars.map {
-                Pair(it.key, it.value.variableRange?.first ?: throw UppaalErrorException(
+                Pair(it.key, it.value.variableRange?.first ?: throw UppaalMessageException(
                     createUppaalError(
                     UppaalPath(), "SeComp cannot resolve the value range of the quantifier variable: '${it.key}'"
                 )
@@ -1309,7 +1303,7 @@ class SeCompMapper : Mapper {
             }
         }
 
-        private fun resolveSubProcessName(dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVarValues: HashMap<String, Int> = HashMap()): String {
+        private fun resolveSubProcessName(originalQuery: String, dotExpr: DotExpr, subTemRef: SubTemplateRef, quantifierVarValues: HashMap<String, Int> = HashMap()): String {
             val firstPart = dotExpr.parts[0]
             val resolvedBase = firstPart.identifier +
                 if (dotExpr.parts[0].followedBy == FollowType.ARGUMENTS)
@@ -1317,9 +1311,9 @@ class SeCompMapper : Mapper {
                         (argument.first.toIntOrNull()
                             ?: quantifierVarValues[argument.first]
                             ?: constInts[argument.first]
-                            ?: throw UppaalErrorException(
+                            ?: throw UppaalMessageException(
                                 createUppaalError(
-                                UppaalPath(), rewriter.originalText, argument.second, "Cannot resolve integer value of argument: '${argument.first}'"
+                                UppaalPath(), originalQuery, argument.second, "Cannot resolve integer value of argument: '${argument.first}'"
                             )
                             ))
                             .toString()
@@ -1352,7 +1346,7 @@ class SeCompMapper : Mapper {
                 null
 
             if (range != null && range.second < range.first)
-                throw UppaalErrorException(
+                throw UppaalMessageException(
                     createUppaalError(
                     UppaalPath(), "Found bounded integer with impossible range: '$type' = int[${range.first}, ${range.second}]"
                 )
@@ -1372,12 +1366,6 @@ class SeCompMapper : Mapper {
                 instantiationInfo = numSubTemplateUsers[rootName]!!
             }
             return rootName
-        }
-
-
-        override fun backMapQueryError(error: UppaalError): UppaalError {
-            rewriter.backMapError(error)
-            return error
         }
     }
 }

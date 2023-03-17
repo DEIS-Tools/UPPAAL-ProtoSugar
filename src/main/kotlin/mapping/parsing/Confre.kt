@@ -6,6 +6,9 @@ import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import java.lang.Character.MIN_VALUE as nullChar
 
+// TODO: Add "tagging"-feature to grammar/Confre, such that (among other things) SyntaxRegistry can put safety-related
+//  tags on generated non-terminals
+
 // A "context free grammar"-approximately-equivalent of the "Regex" class.
 // Used to check if a string matches the grammar, contains a match, or to find all matches from the string.
 // Only works for LL(1) grammars. Undefined behavior otherwise.
@@ -16,7 +19,7 @@ import java.lang.Character.MIN_VALUE as nullChar
 // TERMINAL     :== IDENTIFIER '=' REGEX
 // NON_TERMINAL :== IDENTIFIER ':==' BODY '.'
 // BODY         :== { IDENTIFIER | STRING | '(' BODY ')' | '[' BODY ']' | '{' BODY '}' } [ '|' BODY ]
-class Confre(grammar: String) {
+class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
     private val eof: NamedTerminal = NamedTerminal(-1, "EOF", Regex(nullChar.toString()))
     private val terminals: MutableList<Terminal> = ArrayList()
     private val nonTerminals: MutableMap<String , NonTerminal> = HashMap()
@@ -24,17 +27,22 @@ class Confre(grammar: String) {
 
     private val stringPattern = Regex("""'((?>(?>\\[\\'])|[^'\s\\])*)'""")
 
+    companion object {
+        val identifierPattern = Regex("""[_a-zA-Z][_a-zA-Z0-9]*""")
+    }
+
     init {
         this.rootNonTerminal = "NON_TERMINAL"
         if (grammar.isNotBlank()) {
             populateTerminals(grammar)
             populateNonTerminals(grammar)
             validateTerminalsAndNonTerminals()
+            this.rootNonTerminal = rootNonTerminalOverride ?: this.rootNonTerminal
         }
     }
 
     private constructor() : this("") {
-        terminals.add(NamedTerminal(0, "IDENTIFIER", Regex("""[_a-zA-Z][_a-zA-Z0-9]*""")))
+        terminals.add(NamedTerminal(0, "IDENTIFIER", identifierPattern))
         terminals.add(NamedTerminal(1, "STRING", stringPattern))
         terminals.add(AnonymousTerminal(2, "("))
         terminals.add(AnonymousTerminal(3, ")"))
@@ -236,7 +244,7 @@ class Confre(grammar: String) {
 
         if (allowPartialMatch) {
             while (true) {
-                val accepts = nonTerminals[rootNonTerminal]!!.grammar.expects(tokens.current()) ?: throw Exception("")
+                val accepts = nonTerminals[rootNonTerminal]!!.grammar.expects(tokens.current()) ?: throw Exception("") // TODO: Proper error message
                 if (accepts) {
                     val tree = tryMatch(tokens)
                     if (tree != null)
@@ -367,6 +375,7 @@ abstract class Grammar {
     fun expects(token: Token): Boolean? = expects(token.terminal.id)
     abstract fun expects(nextTerminalID: Int): Boolean?
     abstract fun treeWalk(): Sequence<Grammar>
+    abstract fun children(): Sequence<Grammar>
 }
 
 class Sequential(val body: List<Grammar>) : Grammar() {
@@ -379,36 +388,27 @@ class Sequential(val body: List<Grammar>) : Grammar() {
         return null
     }
 
-    override fun toString(): String {
-        return "Sequential(${body.joinToString(separator = " ")})"
-    }
-
-    override fun treeWalk(): Sequence<Grammar>
-        = sequenceOf(this).plus(body.flatMap { it.treeWalk() })
+    override fun toString() = "(${body.joinToString(" ")})"
+    override fun treeWalk(): Sequence<Grammar> = sequenceOf(this).plus(body.flatMap { it.treeWalk() })
+    override fun children(): Sequence<Grammar> = body.asSequence()
 }
 
 class Optional(val body: Grammar) : Grammar() {
     override fun expects(nextTerminalID: Int): Boolean?
         = if (body.expects(nextTerminalID) == true) true else null
 
-    override fun toString(): String {
-        return "Optional($body)"
-    }
-
-    override fun treeWalk(): Sequence<Grammar>
-        = sequenceOf(this).plus(body.treeWalk())
+    override fun toString() = "[$body]"
+    override fun treeWalk(): Sequence<Grammar> = sequenceOf(this).plus(body.treeWalk())
+    override fun children(): Sequence<Grammar> = sequenceOf(body)
 }
 
 class Multiple(val body: Grammar) : Grammar() {
     override fun expects(nextTerminalID: Int): Boolean?
         = if (body.expects(nextTerminalID) == true) true else null
 
-    override fun toString(): String {
-        return "Multiple($body)"
-    }
-
-    override fun treeWalk(): Sequence<Grammar>
-        = sequenceOf(this).plus(body.treeWalk())
+    override fun toString() = "{$body}"
+    override fun treeWalk(): Sequence<Grammar>  = sequenceOf(this).plus(body.treeWalk())
+    override fun children(): Sequence<Grammar> = sequenceOf(body)
 }
 
 class Choice(val options: List<Grammar>) : Grammar() {
@@ -424,47 +424,36 @@ class Choice(val options: List<Grammar>) : Grammar() {
         return result
     }
 
-    override fun toString(): String {
-        return "Choice(${options.joinToString(separator = " | ")})"
-    }
-
-    override fun treeWalk(): Sequence<Grammar>
-            = sequenceOf(this).plus(options.flatMap { it.treeWalk() })
+    override fun toString() = "(${options.joinToString(separator = " | ")})"
+    override fun treeWalk(): Sequence<Grammar> = sequenceOf(this).plus(options.flatMap { it.treeWalk() })
+    override fun children(): Sequence<Grammar> = options.asSequence()
 }
 
 class TerminalRef(val terminalId: Int) : Grammar() {
     override fun expects(nextTerminalID: Int): Boolean
         = terminalId == nextTerminalID
 
-    override fun toString(): String {
-        return "TerminalRef($terminalId)"
-    }
-
-    override fun treeWalk(): Sequence<Grammar>
-        = sequenceOf(this)
+    override fun toString() = "Term($terminalId)"
+    override fun treeWalk(): Sequence<Grammar> = sequenceOf(this)
+    override fun children(): Sequence<Grammar> = sequenceOf()
 }
 
-class NonTerminalRef(val nonTerminalName: String, private val nonTerminals: Map<String, NonTerminal>) : Grammar() {
+class NonTerminalRef(val nonTerminalName: String, val nonTerminals: Map<String, NonTerminal>) : Grammar() {
     override fun expects(nextTerminalID: Int): Boolean?
         = nonTerminals[nonTerminalName]!!.grammar.expects(nextTerminalID)
 
-    override fun toString(): String {
-        return "NonTerminalRef($nonTerminalName)"
-    }
+    override fun toString() = "NonT($nonTerminalName)"
 
-    override fun treeWalk(): Sequence<Grammar>
-        = sequenceOf(this)
+    override fun treeWalk(): Sequence<Grammar> = sequenceOf(this)
+    override fun children(): Sequence<Grammar> = sequenceOf()
 }
 
 class Blank : Grammar() {
     override fun expects(nextTerminalID: Int) = null
 
-    override fun toString(): String {
-        return "Blank()"
-    }
-
-    override fun treeWalk(): Sequence<Grammar>
-        = sequenceOf(this)
+    override fun toString() = "ε"
+    override fun treeWalk(): Sequence<Grammar> = sequenceOf(this)
+    override fun children(): Sequence<Grammar> = sequenceOf()
 }
 
 
@@ -535,16 +524,20 @@ interface ParseTree {
     fun endPosition(): Int
 
     /** Get the inclusive start and end indices in an IntRange object **/
-    fun range(): IntRange = IntRange(startPosition(), endPosition())
+    val range: IntRange
+        get() = IntRange(startPosition(), endPosition())
+
     /** Get the length of the match based on the start and end positions **/
-    fun length(): Int = endPosition() - startPosition() + 1
+    val length: Int
+        get() = endPosition() - startPosition() + 1
 
     fun preOrderWalk(): Sequence<ParseTree>
     fun postOrderWalk(): Sequence<ParseTree>
     fun tokens(): Sequence<Token>
 
-    fun asNode(): Node = this as Node
-    fun asLeaf(): Leaf = this as Leaf
+    fun asNode(): Node = this as? Node ?: throw Exception("Parse-tree is not a node")
+    fun asLeaf(): Leaf = this as? Leaf ?: throw Exception("Parse-tree is not a leaf")
+    fun toStringNotNull(): String
 }
 
 class Node(override val grammar: Grammar, val children: List<ParseTree?>) : ParseTree {
@@ -553,7 +546,8 @@ class Node(override val grammar: Grammar, val children: List<ParseTree?>) : Pars
     override fun endPosition(): Int = children.last { it?.isNotBlank() ?: false }!!.endPosition()
 
     /** Get the inclusive start and end indices based on child indices in an IntRange object **/
-    fun range(firstChild: Int, lastChild: Int): IntRange = IntRange(children[firstChild]!!.startPosition(), children[lastChild]!!.endPosition())
+    fun range(firstChild: Int, lastChild: Int): IntRange
+            = IntRange(children[firstChild]!!.startPosition(), children[lastChild]!!.endPosition())
 
     override fun preOrderWalk(): Sequence<ParseTree> = sequence{
         yield(this@Node)
@@ -570,22 +564,26 @@ class Node(override val grammar: Grammar, val children: List<ParseTree?>) : Pars
         = children.filterNotNull().asSequence().flatMap { it.tokens() }
 
     override fun toString() = children.joinToString(" ")
+    override fun toStringNotNull() = children.filter { it?.isNotBlank() ?: false }.joinToString(" ") { it!!.toStringNotNull() }
 }
 
 class Leaf(override val grammar: Grammar, val token: Token?) : ParseTree {
     init {
-        assert((grammar is Blank) == (token == null))
+        assert((grammar is Blank) == (token == null)) { "A leaf can only have a null-token (${token == null}) if and only if the grammer is 'Blank' (${grammar is Blank})" }
     }
 
     override fun isNotBlank() = grammar !is Blank
-    override fun startPosition(): Int = token!!.startIndex
-    override fun endPosition(): Int = token!!.startIndex + token.value.length - 1
+    override fun startPosition(): Int
+            = token?.startIndex ?: throw Exception("Cannot get start-position of 'Blank' leaf")
+    override fun endPosition(): Int
+            = (token?.startIndex ?: throw Exception("Cannot get end-position of 'Blank' leaf")) + token.value.length - 1
 
     override fun preOrderWalk(): Sequence<ParseTree> = sequenceOf(this@Leaf)
     override fun postOrderWalk(): Sequence<ParseTree> = sequenceOf(this@Leaf)
     override fun tokens(): Sequence<Token> = token?.let { sequenceOf(it) } ?: sequenceOf()
 
     override fun toString() = token?.value ?: ""
+    override fun toStringNotNull() = token?.value ?: ""
 }
 
 

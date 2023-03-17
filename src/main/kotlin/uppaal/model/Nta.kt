@@ -10,7 +10,7 @@ class Nta : UppaalPojo {
     lateinit var declaration: Declaration
 
     @field:ElementList(name = "template", required = false, inline = true)
-    var templates: List<Template> = ArrayList()
+    var templates: MutableList<Template> = ArrayList()
 
     @field:Element(name = "system")
     lateinit var system: System

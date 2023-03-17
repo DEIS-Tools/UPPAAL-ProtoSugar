@@ -1,4 +1,4 @@
-package uppaal.error
+package uppaal.messaging
 
 import uppaal.model.*
 import uppaal.model.System
@@ -14,6 +14,8 @@ class UppaalPath private constructor(path: List<PathNode>): ArrayList<PathNode>(
     override fun toString() =
         if (isEmpty()) ""
         else '/' + joinToString("/")
+
+    fun toDotNotation() = joinToString(".") // TODO: Perhaps, perhaps not?
 }
 
 data class PathNode(val element: UppaalPojo, @Suppress("MemberVisibilityCanBePrivate") val index: Int? = null) {
@@ -27,6 +29,9 @@ data class PathNode(val element: UppaalPojo, @Suppress("MemberVisibilityCanBePri
             is Template -> "template[${index ?: throw Exception("PathNode with Template has 'index == null'")}]"
             is Transition -> "transition[${index ?: throw Exception("PathNode with Transition has 'index == null'")}]"
             is Location ->  "location[${index ?: throw Exception("PathNode with Location has 'index == null'")}]"
+            is Branchpoint ->  "branchpoint[${index ?: throw Exception("PathNode with BranchPoint has 'index == null'")}]"
+            is BoundaryPoint ->  "boundarypoint[${index ?: throw Exception("PathNode with BoundaryPoint has 'index == null'")}]"
+            is SubTemplateReference ->  "subtemplatereference[${index ?: throw Exception("PathNode with SubTemplateReference has 'index == null'")}]"
             is Label ->  "label[${index ?: throw Exception("PathNode with Label has 'index == null'")}]"
             else -> throw Exception("PathNode cannot print unhandled UppaalPojo '${element::class.java.typeName}'")
         }
