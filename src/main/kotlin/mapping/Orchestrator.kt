@@ -1,9 +1,9 @@
 package mapping
 
-import mapping.mapping.*
-import mapping.parsing.SyntaxRegistry
+import mapping.base.*
+import tools.parsing.SyntaxRegistry
 import uppaal.messaging.UppaalMessage
-import uppaal.messaging.UppaalPath
+import uppaal.UppaalPath
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
 import uppaal.messaging.UppaalMessageException
@@ -78,16 +78,16 @@ class Orchestrator(private val mappers: List<Mapper>) {
         return errors
     }
     private fun visitNta(nta: Nta, path: UppaalPath, phase: ModelPhase): List<UppaalMessage> =
-        phase.visit(path, nta).plus(phase.visit(path.plus(nta.declaration), nta.declaration))
+        phase.visit(path, nta).plus(phase.visit(path.extend(nta.declaration), nta.declaration))
             .plus(
                 nta.templates.withIndex().flatMap { visitTemplate(it.value, path.plus(it), phase) }
             )
-            .plus(phase.visit(path.plus(nta.system), nta.system))
+            .plus(phase.visit(path.extend(nta.system), nta.system))
     private fun visitTemplate(template: Template, path: UppaalPath, phase: ModelPhase): List<UppaalMessage> =
         phase.visit(path, template).asSequence()
-            .plus(phase.visit(path.plus(template.name), template.name))
-            .plus((template.parameter?.let { phase.visit(path.plus(it), it) } ?: listOf()))
-            .plus(template.declaration?.let { phase.visit(path.plus(it), it) } ?: listOf())
+            .plus(phase.visit(path.extend(template.name), template.name))
+            .plus((template.parameter?.let { phase.visit(path.extend(it), it) } ?: listOf()))
+            .plus(template.declaration?.let { phase.visit(path.extend(it), it) } ?: listOf())
             .plus(
                 template.locations.withIndex().flatMap { phase.visit(path.plus(it), it.value) }
             )

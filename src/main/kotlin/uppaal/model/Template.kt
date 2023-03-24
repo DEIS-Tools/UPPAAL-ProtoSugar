@@ -3,7 +3,7 @@ package uppaal.model
 import org.simpleframework.xml.*
 
 @Root(name = "template")
-class Template : UppaalPojo {
+class Template() : UppaalPojo {
     @field:Element(name = "name", required = false)
     var name: Name = Name()
 
@@ -30,4 +30,40 @@ class Template : UppaalPojo {
 
     @field:ElementList(name = "transition", required = false, inline = true)
     var transitions: MutableList<Transition> = ArrayList()
+
+
+    constructor(name: Name,
+                parameter: Parameter?,
+                declaration: Declaration?,
+                locations: MutableList<Location>,
+                branchpoints: MutableList<Branchpoint>,
+                boundarypoints: MutableList<BoundaryPoint>,
+                subtemplatereferences: MutableList<SubTemplateReference>,
+                init: Init?,
+                transitions: MutableList<Transition>)
+            : this()
+    {
+        this.name = name
+        this.parameter = parameter
+        this.declaration = declaration
+        this.locations = locations
+        this.branchpoints = branchpoints
+        this.boundarypoints = boundarypoints
+        this.subtemplatereferences = subtemplatereferences
+        this.init = init
+        this.transitions = transitions
+    }
+
+
+    fun clone(): Template = Template(
+        name.clone(),
+        parameter?.clone(),
+        declaration?.clone(),
+        locations.asSequence().map { it.clone() }.toMutableList(),
+        branchpoints.asSequence().map { it.clone() }.toMutableList(),
+        boundarypoints.asSequence().map { it.clone() }.toMutableList(),
+        subtemplatereferences.asSequence().map { it.clone() }.toMutableList(),
+        init?.clone(),
+        transitions.asSequence().map { it.clone() }.toMutableList()
+    )
 }

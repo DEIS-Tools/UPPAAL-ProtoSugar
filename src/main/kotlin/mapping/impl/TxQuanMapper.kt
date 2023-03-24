@@ -1,14 +1,13 @@
 package mapping.impl
 
-import mapping.mapping.Mapper
-import mapping.mapping.PhaseOutput
-import mapping.mapping.QueryPhase
-import mapping.parsing.Confre
-import mapping.parsing.ConfreHelper
-import mapping.parsing.Leaf
-import mapping.parsing.ParseTree
-import mapping.restructuring.TextRewriter
-import uppaal.messaging.UppaalMessage
+import mapping.base.Mapper
+import mapping.base.PhaseOutput
+import mapping.base.QueryPhase
+import tools.parsing.Confre
+import tools.parsing.ConfreHelper
+import tools.parsing.Leaf
+import tools.parsing.ParseTree
+import tools.restructuring.TextRewriter
 
 class TxQuanMapper : Mapper() {
     override fun getPhases() = PhaseOutput(listOf(), null, TxQuanQueryPhase())

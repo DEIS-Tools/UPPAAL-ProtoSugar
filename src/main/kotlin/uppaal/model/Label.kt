@@ -6,6 +6,13 @@ import org.simpleframework.xml.Text
 
 @Root(name = "label")
 class Label() : TextUppaalPojo {
+    companion object {
+        const val KIND_SELECT = "select"
+        const val KIND_GUARD = "guard"
+        const val KIND_SYNC = "synchronisation"
+        const val KIND_UPDATE = "assignment"
+    }
+
     @field:Attribute(name = "kind")
     lateinit var kind: String
 
@@ -18,12 +25,14 @@ class Label() : TextUppaalPojo {
     @field:Text
     override var content: String = ""
 
-    constructor(initKind: String, initX: Int, initY: Int) : this() {
-        kind = initKind
-        x = initX
-        y = initY
-        content = ""
+    constructor(kind: String, x: Int, y: Int, content: String = "") : this() {
+        this.kind = kind
+        this.x = x
+        this.y = y
+        this.content = content
     }
 
-    override fun toString() = "$kind: ${content ?: ""}"
+    override fun toString() = "$kind: $content"
+
+    fun clone(): Label = Label(kind, x, y, content)
 }

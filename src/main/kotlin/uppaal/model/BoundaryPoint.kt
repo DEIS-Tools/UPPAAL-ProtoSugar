@@ -5,7 +5,12 @@ import org.simpleframework.xml.Element
 import org.simpleframework.xml.Root
 
 @Root(name = "boundarypoint")
-class BoundaryPoint : UppaalPojo {
+class BoundaryPoint() : UppaalPojo {
+    companion object {
+        const val ENTRY = "entry"
+        const val EXIT = "exit"
+    }
+
     @field:Attribute(name = "id")
     lateinit var id: String
 
@@ -20,4 +25,16 @@ class BoundaryPoint : UppaalPojo {
 
     @field:Element(name = "name", required = false)
     var name: Name? = null
+
+
+    constructor(id: String, x: Int, y: Int, kind: String, name: Name?) : this() {
+        this.id = id
+        this.x = x
+        this.y = y
+        this.kind = kind
+        this.name = name
+    }
+
+
+    fun clone(): BoundaryPoint = BoundaryPoint(id, x, y, kind, name?.clone())
 }

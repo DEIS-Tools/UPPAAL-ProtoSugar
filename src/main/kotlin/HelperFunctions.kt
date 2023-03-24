@@ -1,7 +1,7 @@
 import kotlinx.serialization.json.*
-import uppaal.messaging.UppaalPath
-import mapping.restructuring.InsertOp
-import mapping.restructuring.TextRewriter
+import uppaal.UppaalPath
+import tools.restructuring.InsertOp
+import tools.restructuring.TextRewriter
 import java.io.BufferedWriter
 import java.io.File
 

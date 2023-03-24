@@ -1,16 +1,16 @@
 package mapping.impl
 
+import tools.parsing.*
 import createOrGetRewriter
 import joinInsert
-import mapping.mapping.Mapper
-import mapping.mapping.ModelPhase
-import mapping.mapping.PhaseOutput
-import mapping.parsing.*
-import mapping.restructuring.ActivationRule
-import mapping.restructuring.BackMapResult
-import mapping.restructuring.TextRewriter
+import mapping.base.Mapper
+import mapping.base.ModelPhase
+import mapping.base.PhaseOutput
+import tools.restructuring.ActivationRule
+import tools.restructuring.BackMapResult
+import tools.restructuring.TextRewriter
 import uppaal.messaging.UppaalMessage
-import uppaal.messaging.UppaalPath
+import uppaal.UppaalPath
 import uppaal.messaging.createUppaalError
 import uppaal.model.*
 
@@ -93,8 +93,8 @@ class PaChaMapper : Mapper() {
             if (!transition.labels.contains(update))
                 transition.labels.add(update)
 
-            val syncPath = path.plus(sync, transition.labels.indexOf(sync) + 1)
-            val updatePath = path.plus(update, transition.labels.indexOf(update) + 1)
+            val syncPath = path.extend(sync, transition.labels.indexOf(sync) + 1)
+            val updatePath = path.extend(update, transition.labels.indexOf(update) + 1)
             return mapEmitOrReceive(syncPath, updatePath, match, sync, update, templatePaChas)
         }
 

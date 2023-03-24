@@ -6,7 +6,7 @@ import org.simpleframework.xml.ElementList
 import org.simpleframework.xml.Root
 
 @Root(name = "subtemplatereference")
-class SubTemplateReference : UppaalPojo {
+class SubTemplateReference() : UppaalPojo {
     @field:Element(name = "name", required = false)
     var name: Name? = null
 
@@ -27,4 +27,30 @@ class SubTemplateReference : UppaalPojo {
 
     @field:Attribute(name = "height")
     var height: Int = 0
+
+
+    constructor(name: Name?,
+                subtemplatename: SubTemplateName?,
+                boundarypoints: MutableList<BoundaryPoint>,
+                x: Int,
+                y: Int,
+                width: Int,
+                height: Int)
+            : this() {
+        this.name = name
+        this.subtemplatename = subtemplatename
+        this.boundarypoints = boundarypoints
+        this.x = x
+        this.y = y
+        this.width = width
+        this.height = height
+    }
+
+
+    fun clone(): SubTemplateReference = SubTemplateReference(
+        name?.clone(),
+        subtemplatename?.clone(),
+        boundarypoints.asSequence().map { it.clone() }.toMutableList(),
+        x, y, width, height
+    )
 }

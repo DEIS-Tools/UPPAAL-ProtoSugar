@@ -13,4 +13,6 @@ class Parameter() : TextUppaalPojo {
     }
 
     override fun toString() = content
+
+    fun clone(): Parameter = Parameter(content)
 }

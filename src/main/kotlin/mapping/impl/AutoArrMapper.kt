@@ -1,18 +1,22 @@
 package mapping.impl
 
-import mapping.mapping.*
-import mapping.parsing.*
-import mapping.restructuring.ActivationRule
-import mapping.restructuring.TextRewriter
-import mapping.scoping.Modifier
-import mapping.scoping.Scope
-import mapping.scoping.declarations.Field
-import mapping.scoping.types.IntType
+import mapping.base.*
+import tools.indexing.DeclarationBase
+import tools.restructuring.ActivationRule
+import tools.restructuring.TextRewriter
+import tools.indexing.tree.ScopeDecl
+import tools.indexing.textual.VariableDecl
+import tools.indexing.tree.RootScope
+import tools.indexing.types.Const
+import tools.indexing.types.IntType
+import tools.parsing.GuardedParseTree
 import uppaal.messaging.UppaalMessage
-import uppaal.messaging.UppaalPath
+import uppaal.UppaalPath
 import uppaal.messaging.createUppaalError
 import uppaal.model.Declaration
 import uppaal.model.System
+import uppaal.model.Template
+import uppaal.model.TextUppaalPojo
 
 class AutoArrMapper : Mapper() {
     override val registerSyntax: RegistryBuilder.() -> Unit = {
@@ -25,7 +29,7 @@ class AutoArrMapper : Mapper() {
     override fun getPhases()
         = PhaseOutput(listOf(Phase1()), null, null)
 
-    val globalScope = Scope()
+    val globalScope = RootScope()
 
 
     private inner class Phase1 : ModelPhase()
@@ -41,30 +45,36 @@ class AutoArrMapper : Mapper() {
 
         private fun mapDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalMessage> {
             val rewriter = getRewriter(path, declaration.content)
-            val errors = doMapping(rewriter, path, if (path.size == 2) globalScope else Scope(globalScope))
+            val scope = when (path.size) {
+                2 -> globalScope
+                3 -> ScopeDecl((path[1].element as Template).name.content, path[1].element, globalScope)
+                else -> throw Exception("Unexpected path length '${path.size}' leading to a Declaration UppaalPojo")
+            }
+
+            val errors = doMapping(rewriter, path, scope)
             declaration.content = rewriter.getRewrittenText()
             return errors
         }
 
         private fun mapSystem(path: UppaalPath, system: System): List<UppaalMessage> {
             val rewriter = getRewriter(path, system.content)
-            val errors = doMapping(rewriter, path, Scope(globalScope))
+            val errors = doMapping(rewriter, path, globalScope)
             system.content = rewriter.getRewrittenText()
             return errors
         }
 
-        private fun doMapping(rewriter: TextRewriter, path: UppaalPath, scope: Scope): List<UppaalMessage> {
+        private fun doMapping(rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationBase): List<UppaalMessage> {
             val errors = ArrayList<UppaalMessage>()
             for (decl in declarationConfre.findAll(rewriter.originalText)) {
                 val varNode = decl.findLocal("VarOrFunction") ?: continue
                 if (varNode.localFullySafe)
-                    if (!tryRegisterConstInt(varNode, rewriter, scope))
-                        errors.addAll(tryParseAutoArray(varNode, rewriter, path, scope))
+                    if (!tryRegisterConstInt(varNode, path.last().element as TextUppaalPojo, rewriter, scopeDecl))
+                        errors.addAll(tryParseAutoArray(varNode, rewriter, path, scopeDecl))
             }
             return errors
         }
 
-        private fun tryRegisterConstInt(varNode: GuardedParseTree, rewriter: TextRewriter, scope: Scope): Boolean {
+        private fun tryRegisterConstInt(varNode: GuardedParseTree, source: TextUppaalPojo, rewriter: TextRewriter, scopeDecl: DeclarationBase): Boolean {
             // Check if "non-array instantiation" // TODO: Parse all declarations (using "Declaration parser (mapper)????")
             val exprNode = varNode[2]!!.findLocal("Expression") ?: return false
             if (!varNode[2]!![0]!!.isBlank) // Ensure no subscript/array-notation
@@ -82,11 +92,11 @@ class AutoArrMapper : Mapper() {
             // Register if value ís valid integer
             val value = rewriter.originalText.substring(exprNode.fullRange).toIntOrNull() ?: return false
             val identifier = varNode[1]!!.toString()
-            scope.add(Field(identifier, IntType(Modifier.CONST), defaultValue = value))
+            scopeDecl.add(VariableDecl(identifier, varNode, source, IntType(Const()), defaultValue = value))
             return true
         }
 
-        private fun tryParseAutoArray(varNode: GuardedParseTree, rewriter: TextRewriter, path: UppaalPath, scope: Scope): List<UppaalMessage> {
+        private fun tryParseAutoArray(varNode: GuardedParseTree, rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationBase): List<UppaalMessage> {
             // Check if "array with auto-syntax"
             val arrayInitNode = varNode[2]!!.findLocal("ArrayInit") ?: return listOf()
             val autoArrNode = arrayInitNode[3]!!.findLocal("AutoArr") ?: return listOf()
@@ -100,7 +110,7 @@ class AutoArrMapper : Mapper() {
                 return listOf()
 
             // Compute values needed for mapping
-            val dimSizes = getDimensionSizes(subscriptNode, scope)
+            val dimSizes = getDimensionSizes(subscriptNode, scopeDecl)
             val dimVars  = getDimensionVariables(arrayInitNode, autoArrNode)
             val errors = handleDimensionErrors(dimSizes, dimVars, path, rewriter.originalText, varNode)
             if (errors.isNotEmpty())
@@ -130,14 +140,14 @@ class AutoArrMapper : Mapper() {
         }
 
 
-        private fun getDimensionSizes(subscriptNode: GuardedParseTree, scope: Scope): List<Int?> {
+        private fun getDimensionSizes(subscriptNode: GuardedParseTree, scopeDecl: DeclarationBase): List<Int?> {
             val sizeExprNodes = subscriptNode[0]!!.children.map { it?.findLocal("Expression") }
             return sizeExprNodes.map {
                 val expr = it?.toStringNotNull() // TODO: Use "expression evaluator" instead
                 if (expr == null)
                     null
                 else
-                    expr.toIntOrNull() ?: (scope[expr] as? Field)?.defaultValue as? Int
+                    expr.toIntOrNull() ?: throw Exception("Broken rn") //(scopeDecl[expr] as? VariableDecl)?.defaultValue as? Int
             }
         }
 

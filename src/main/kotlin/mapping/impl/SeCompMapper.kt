@@ -1,17 +1,17 @@
 package mapping.impl
 
+import tools.parsing.*
 import ensureStartsWith
 import mapping.*
 import uppaal.messaging.*
-import mapping.restructuring.BackMapResult
-import mapping.restructuring.TextRewriter
+import tools.restructuring.BackMapResult
+import tools.restructuring.TextRewriter
 import createOrGetRewriter
-import mapping.mapping.*
-import mapping.parsing.*
-import mapping.restructuring.ActivationRule
+import mapping.base.*
+import tools.restructuring.ActivationRule
 import uppaal.messaging.UppaalMessage
 import uppaal.messaging.UppaalMessageException
-import uppaal.messaging.UppaalPath
+import uppaal.UppaalPath
 import uppaal.messaging.createUppaalError
 import uppaal.model.*
 import offset
@@ -170,7 +170,7 @@ class SeCompMapper : Mapper() {
                 if (nameAndInstance.size !in 1..2) {
                     errors.add(
                         createUppaalError(
-                        locPath.plus(locAndIndex.value.name!!), locNameContent, "To insert a sub-template, format the location's name as: \"::[sub-template name] [instantiated name]::\" or \"::[sub-template name]::\"."
+                        locPath.extend(locAndIndex.value.name!!), locNameContent, "To insert a sub-template, format the location's name as: \"::[sub-template name] [instantiated name]::\" or \"::[sub-template name]::\"."
                     )
                     )
                     continue
@@ -200,7 +200,7 @@ class SeCompMapper : Mapper() {
 
                 // Give the state the user-defined if present
                 if (null != subTemInstanceName) {
-                    val namePath = locPath.plus(locAndIndex.value.name!!)
+                    val namePath = locPath.extend(locAndIndex.value.name!!)
                     val rewriter = rewriters.createOrGetRewriter(namePath, locNameContent)
                     rewriter.replace(locNameContent.indices, subTemInstanceName)
                         .addBackMap()
@@ -220,7 +220,7 @@ class SeCompMapper : Mapper() {
                 else if (parameters.isNullOrBlank()) // No parameters => just 1 instance
                     numSubTemplateUsers[temName] = FreeInstantiation(null, listOf())
                 else {
-                    val parameterValueRanges = getParameterRanges(parameters, path.plus(template.parameter!!), errors)
+                    val parameterValueRanges = getParameterRanges(parameters, path.extend(template.parameter!!), errors)
                     numSubTemplateUsers[temName] = FreeInstantiation(null, parameterValueRanges)
                 }
             }
@@ -587,7 +587,7 @@ class SeCompMapper : Mapper() {
 
                 val guardLabel = entryTransition.value.labels.find { it.kind == "guard" }
                     ?: generateAndAddLabel("guard", template, entryTransition.value)
-                val guardPath = transitionPath.plus(guardLabel, entryTransition.value.labels.indexOf(guardLabel) + 1)
+                val guardPath = transitionPath.extend(guardLabel, entryTransition.value.labels.indexOf(guardLabel) + 1)
 
                 // Add activation guard
                 val guardRewriter = rewriters.createOrGetRewriter(guardPath, guardLabel.content)
@@ -604,7 +604,7 @@ class SeCompMapper : Mapper() {
 
                 val updateLabel = exitTransition.value.labels.find { it.kind == "assignment" }
                     ?: generateAndAddLabel("assignment", template, exitTransition.value)
-                val updatePath = transitionPath.plus(updateLabel, exitTransition.value.labels.indexOf(updateLabel) + 1)
+                val updatePath = transitionPath.extend(updateLabel, exitTransition.value.labels.indexOf(updateLabel) + 1)
 
                 // Add deactivation statement
                 val updateRewriter = rewriters.createOrGetRewriter(updatePath, updateLabel.content)
@@ -620,7 +620,7 @@ class SeCompMapper : Mapper() {
             // Add "sub-template index" parameter which is used identify each instance of this template (as a sub-template)
             if (template.parameter == null)
                 template.parameter = Parameter("")
-            val parameterRewriter = rewriters.createOrGetRewriter(path.plus(template.parameter!!), template.parameter!!.content)
+            val parameterRewriter = rewriters.createOrGetRewriter(path.extend(template.parameter!!), template.parameter!!.content)
             if (template.parameter!!.content.isNotBlank())
                 parameterRewriter.append(", ")
             parameterRewriter.append("const int STEM_INDEX")
@@ -639,7 +639,7 @@ class SeCompMapper : Mapper() {
 
                     val guardLabel = outgoing.value.labels.find { it.kind == "guard" }
                         ?: generateAndAddLabel("guard", template, outgoing.value)
-                    val guardPath = transitionPath.plus(guardLabel, outgoing.value.labels.indexOf(guardLabel) + 1)
+                    val guardPath = transitionPath.extend(guardLabel, outgoing.value.labels.indexOf(guardLabel) + 1)
 
                     // Add exit guard
                     val guardRewriter = rewriters.createOrGetRewriter(guardPath, guardLabel.content)
@@ -656,7 +656,7 @@ class SeCompMapper : Mapper() {
 
                     val updateLabel = ingoing.value.labels.find { it.kind == "assignment" }
                         ?: generateAndAddLabel("assignment", template, ingoing.value)
-                    val updatePath = transitionPath.plus(updateLabel, ingoing.value.labels.indexOf(updateLabel) + 1)
+                    val updatePath = transitionPath.extend(updateLabel, ingoing.value.labels.indexOf(updateLabel) + 1)
 
                     // Add activation statement
                     val updateRewriter = rewriters.createOrGetRewriter(updatePath, updateLabel.content)
@@ -670,7 +670,7 @@ class SeCompMapper : Mapper() {
             // Add "user index" parameter which is used identify each instance of this template (as a sub-template USER)
             if (template.parameter == null)
                 template.parameter = Parameter("")
-            val parameterRewriter = rewriters.createOrGetRewriter(path.plus(template.parameter!!), template.parameter!!.content)
+            val parameterRewriter = rewriters.createOrGetRewriter(path.extend(template.parameter!!), template.parameter!!.content)
             if (template.parameter!!.content.isNotBlank())
                 parameterRewriter.append(", ")
             parameterRewriter.append("const int USER_INDEX")

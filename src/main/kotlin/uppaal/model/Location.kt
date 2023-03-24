@@ -6,7 +6,7 @@ import org.simpleframework.xml.ElementList
 import org.simpleframework.xml.Root
 
 @Root(name = "location")
-class Location : UppaalPojo {
+class Location() : UppaalPojo {
     @field:Attribute(name = "id")
     lateinit var id: String
 
@@ -27,4 +27,19 @@ class Location : UppaalPojo {
 
     @field:Element(name = "committed", required = false)
     var committed: Committed? = null
+
+
+    constructor(id: String, x: Int, y: Int, name: Name?, labels: MutableList<Label>, urgent: Urgent?, committed: Committed?) : this() {
+        this.id = id
+        this.x = x
+        this.y = y
+        this.name = name
+        this.labels = labels
+        this.urgent = urgent
+        this.committed = committed
+    }
+
+
+    fun clone(): Location =
+        Location(id, x, y, name?.clone(), labels.map { it.clone() }.toMutableList(), urgent?.clone(), committed?.clone())
 }

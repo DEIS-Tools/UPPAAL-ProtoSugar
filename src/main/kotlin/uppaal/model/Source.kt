@@ -11,4 +11,6 @@ class Source() : UppaalPojo {
     constructor(ref: String) : this() {
         this.ref = ref
     }
+
+    fun clone(): Source = Source(ref)
 }

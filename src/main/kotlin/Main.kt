@@ -1,11 +1,14 @@
+import interception.DataDumpInterceptor
+import interception.DoNothingInterceptor
+import interception.InterceptStreams
 import kotlinx.coroutines.*
 import mapping.Orchestrator
 import mapping.impl.AutoArrMapper
 import mapping.impl.PaChaMapper
 import mapping.impl.SeCompMapper
 import mapping.impl.TxQuanMapper
-import mapping.interception.*
-import mapping.interception.MappingInterceptor
+import interception.MappingInterceptor
+import mapping.impl.aiocomp.AioCompMapper
 import java.io.*
 import kotlin.io.path.Path
 import kotlin.io.path.pathString
@@ -26,7 +29,8 @@ private val availableMappers = mapOf(
     Pair("PaCha") { PaChaMapper() },
     Pair("AutoArr") { AutoArrMapper() },
     Pair("TxQuan") { TxQuanMapper() },
-    Pair("SeComp") { SeCompMapper() }
+    Pair("SeComp") { SeCompMapper() },
+    Pair("AioComp") { AioCompMapper() }
 )
 
 private lateinit var tags: Map<String, List<String>>

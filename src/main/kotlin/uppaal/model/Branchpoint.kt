@@ -4,7 +4,7 @@ import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Root
 
 @Root(name = "branchpoint")
-class Branchpoint : UppaalPojo {
+class Branchpoint() : UppaalPojo {
     @field:Attribute(name = "id")
     lateinit var id: String
 
@@ -13,4 +13,14 @@ class Branchpoint : UppaalPojo {
 
     @field:Attribute(name = "y")
     var y: Int = 0
+
+
+    constructor(id: String, x: Int, y: Int) : this () {
+        this.id = id
+        this.x = x
+        this.y = y
+    }
+
+
+    fun clone(): Branchpoint = Branchpoint(id, x, y)
 }

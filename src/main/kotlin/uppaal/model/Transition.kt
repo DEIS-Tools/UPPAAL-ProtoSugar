@@ -23,6 +23,7 @@ class Transition() : UppaalPojo { // Primary constructor needed for XML deserial
     @field:ElementList(name = "nail", inline = true, required = false)
     var nails: MutableList<Nail> = ArrayList()
 
+
     constructor(id: String, source: Source, target: Target, labels: MutableList<Label> = arrayListOf(), nails: MutableList<Nail> = arrayListOf()) : this() {
         this.id = id
         this.source = source
@@ -30,4 +31,11 @@ class Transition() : UppaalPojo { // Primary constructor needed for XML deserial
         this.labels = labels
         this.nails = nails
     }
+
+
+    fun getLabel(kind: String): Label? =
+        labels.find { it.kind == kind }
+
+    fun clone(): Transition =
+        Transition(id, source.clone(), target.clone(), labels.map { it.clone() }.toMutableList(), nails.map { it.clone() }.toMutableList())
 }

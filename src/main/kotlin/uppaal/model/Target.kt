@@ -11,4 +11,6 @@ class Target() : UppaalPojo {
     constructor(ref: String) : this() {
         this.ref = ref
     }
+
+    fun clone(): Target = Target(ref)
 }
