@@ -10,7 +10,7 @@ class SubTemplateInfixer {
 
         @JvmStatic
         fun infix(info: TaTemplateInfo, index: AioCompModelIndex): Template {
-            val result = flatten(info, index, emptyList(), 0).first
+            val result = flatten(info, index, emptyList())
             result.name.content = "_infixed_${info.trueName}"
             result.init = info.element.init?.clone()
             result.parameter = info.element.parameter?.clone()
@@ -64,7 +64,7 @@ class SubTemplateInfixer {
 
                     // TODO: Be able to detect and delete incomplete paths.
 
-                    determineIdSourceAndTarget(partial, newTransition, partial.entering, partial.exiting, declPrefix)
+                    determineIdSourceAndTarget(partial, newTransition, declPrefix)
 
                     // TODO: Merge labels
 
@@ -88,15 +88,13 @@ class SubTemplateInfixer {
         private fun determineIdSourceAndTarget(
             partial: Partial,
             newTransition: Transition,
-            entering: Transition?,
-            exiting: Transition?,
             declPrefix: List<String>
         ) {
             if (partial.entering != null) {
-                newTransition.id = entering.id
-                newTransition.source = entering.source
+                newTransition.id = partial.entering.id
+                newTransition.source = partial.entering.source
                 if (partial.exiting != null)
-                    newTransition.target = exiting.target
+                    newTransition.target = partial.exiting.target
                 else {
                     newTransition.target = partial.inside.target
                     newTransition.target.ref = qualify(newTransition.target.ref, declPrefix)
@@ -104,7 +102,7 @@ class SubTemplateInfixer {
             } else {
                 newTransition.id = partial.exiting!!.id
                 newTransition.source = partial.inside.source
-                newTransition.target = exiting.target
+                newTransition.target = partial.exiting.target
                 newTransition.source.ref = qualify(newTransition.source.ref, declPrefix)
             }
         }
