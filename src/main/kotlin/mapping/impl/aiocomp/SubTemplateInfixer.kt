@@ -6,7 +6,7 @@ import uppaal.model.Transition
 
 class SubTemplateInfixer {
     companion object {
-        private const val SEP = "_\$_"
+        private const val STD_SEP = "_\$_"
 
         @JvmStatic
         fun infix(info: TaTemplateInfo, index: AioCompModelIndex): Template {
@@ -14,9 +14,14 @@ class SubTemplateInfixer {
             result.name.content = "_infixed_${info.trueName}"
             result.init = info.element.init?.clone()
             result.parameter = info.element.parameter?.clone()
-            result.declaration = info.element.declaration?.clone()
+            result.declaration = info.element.declaration?.clone() // TODO: Remove since "flatten" or "merge" should do this
             result.subtemplatereferences.clear()
             result.boundarypoints.clear()
+
+            // Trim transitions/paths that start or end in a boundary point (and thus do not actually exist)
+            val locationIDs = result.locations.map { it.id }.toSet()
+            result.transitions.removeAll { it.source.ref !in locationIDs || it.target.ref !in locationIDs }
+
             return result
         }
 
@@ -29,6 +34,7 @@ class SubTemplateInfixer {
                 )
             }
             val result = currentInfo.element.clone()
+            result.name.content = "_temp_" + result.name.content
 
             // TODO: Later -> map declaration and parameter names and usages thereof
             for (location in result.locations)
@@ -36,9 +42,8 @@ class SubTemplateInfixer {
 
             for ((flatSub, boundaryInfo) in flatSubs) {
                 val instanceName = boundaryInfo.getOrNull(0)?.subTemplateReference?.name?.content ?: ""
-                merge(result, flatSub, boundaryInfo, declPrefix + instanceName)
+                merge(result, flatSub, boundaryInfo, listOf(instanceName))
             }
-
 
             // TODO: Later -> store back-mapping information somewhere
             return result
@@ -51,7 +56,7 @@ class SubTemplateInfixer {
             // TODO: Later -> map/move/merge parameters/arguments
             // TODO: Later -> move declarations
 
-            // TODO: Merge edges
+            // Merge edges between boundary points
             for (path in getPartialBoundaryPaths(parent, flatSub, boundaryInfo)) {
                 flatSub.transitions.remove(path.inside)
                 if (path.isEmpty)
@@ -61,10 +66,7 @@ class SubTemplateInfixer {
 
                 for (partial in path.getAllCombinations()) {
                     val newTransition = Transition()
-
-                    // TODO: Be able to detect and delete incomplete paths.
-
-                    determineIdSourceAndTarget(partial, newTransition, declPrefix)
+                    determineIdOfSourceAndTarget(partial, newTransition, declPrefix)
 
                     // TODO: Merge labels
 
@@ -75,41 +77,41 @@ class SubTemplateInfixer {
             // Move rest of locations and edges + adjust IDs
             for (location in flatSub.locations) {
                 parent.locations.add(location)
-                location.id = qualify(location.id, declPrefix)
+                location.id = qualify(location.id, declPrefix, ".")
             }
             for (edge in flatSub.transitions) {
                 parent.transitions.add(edge)
-                edge.id = qualify(edge.id, declPrefix)
-                edge.source.ref = qualify(edge.source.ref, declPrefix)
-                edge.target.ref = qualify(edge.target.ref, declPrefix)
+                edge.id = qualify(edge.id, declPrefix, ".")
+                edge.source.ref = qualify(edge.source.ref, declPrefix, ".")
+                edge.target.ref = qualify(edge.target.ref, declPrefix, ".")
             }
         }
 
-        private fun determineIdSourceAndTarget(
+        private fun determineIdOfSourceAndTarget(
             partial: Partial,
             newTransition: Transition,
             declPrefix: List<String>
         ) {
             if (partial.entering != null) {
                 newTransition.id = partial.entering.id
-                newTransition.source = partial.entering.source
+                newTransition.source = partial.entering.source.clone()
                 if (partial.exiting != null)
-                    newTransition.target = partial.exiting.target
+                    newTransition.target = partial.exiting.target.clone()
                 else {
-                    newTransition.target = partial.inside.target
-                    newTransition.target.ref = qualify(newTransition.target.ref, declPrefix)
+                    newTransition.target = partial.inside.target.clone()
+                    newTransition.target.ref = qualify(newTransition.target.ref, declPrefix, ".") // Only qualify inside sub-template
                 }
             } else {
                 newTransition.id = partial.exiting!!.id
-                newTransition.source = partial.inside.source
-                newTransition.target = partial.exiting.target
-                newTransition.source.ref = qualify(newTransition.source.ref, declPrefix)
+                newTransition.source = partial.inside.source.clone()
+                newTransition.target = partial.exiting.target.clone()
+                newTransition.source.ref = qualify(newTransition.source.ref, declPrefix, ".") // Only qualify inside sub-template
             }
         }
 
         @JvmStatic
-        private fun qualify(baseName: String, prefixes: List<String>) =
-            SEP + (prefixes + baseName).joinToString(SEP)
+        private fun qualify(baseName: String, prefixes: List<String>, sep: String = STD_SEP) =
+            sep + (prefixes + baseName).joinToString(sep)
 
         @JvmStatic
         private fun getBoundaryInfo(currentInfo: TaTemplateInfo, subTemplateReference: SubTemplateReference): List<LinkedBoundary>
@@ -158,8 +160,6 @@ class SubTemplateInfixer {
                     !hasEntries && hasExits ->
                         for (exiting in exitingEdges)
                             yield(Partial(null, inside, exiting))
-
-                    else -> throw Exception("Invalid operation")
                 }
             }
         }

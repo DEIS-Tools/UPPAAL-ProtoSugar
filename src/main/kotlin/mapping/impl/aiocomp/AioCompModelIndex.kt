@@ -103,9 +103,6 @@ class AioCompModelIndex {
                 = (if (isSubTemplate(name)) name.drop(2) else name).trim()
     }
 
-    var latestBoundaryPaths: List<BoundaryPath>? = null
-        private set
-
     val taTemplates = LinkedHashMap<String, TaTemplateInfo>()
     val subTemplates = LinkedHashMap<String, TaTemplateInfo>()
     val rootSubTemUsers = LinkedHashMap<String, TaTemplateInfo>()
@@ -128,7 +125,7 @@ class AioCompModelIndex {
         taTemplates[trueName] = info
         if (info.isSubTemplate)
             subTemplates[trueName] = info
-        if (info.isSubTemplateUser)
+        else if (info.isSubTemplateUser)
             rootSubTemUsers[trueName] = info
 
         return info
@@ -182,14 +179,15 @@ class AioCompModelIndex {
             }
 
         // TODO: Handle remaining edges (only problem can be cyclic paths that are not connected to a normal location in any way)
+        //  Incomplete paths with no "normal start"?
 
-        latestBoundaryPaths = paths
         return paths
     }
 
     private fun getBoundaryPaths(path: List<BoundaryPathNode>, referenceChain: List<SubTemplateReference>): Sequence<BoundaryPath> {
         val current = path.last()
 
+        // TODO: Ignore complete paths since they are not used for merging (which is done layer-by-layer)
         if (current.edgeInfo.targetType == EndType.NORMAL)
             return sequenceOf(BoundaryPath(PathType.COMPLETE, path))
 
@@ -197,6 +195,7 @@ class AioCompModelIndex {
         if (cyclicPath.size > 1)
             return sequenceOf(BoundaryPath(PathType.CYCLIC, cyclicPath))
 
+        // TODO: Perhaps ignore incomplete paths? Or make a warning?
         val nextEdges = getNextEdges(path, referenceChain)
         if (nextEdges.isEmpty())
             return sequenceOf(BoundaryPath(PathType.INCOMPLETE, path))
