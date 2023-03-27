@@ -29,6 +29,9 @@ class Location() : UppaalPojo {
     var committed: Committed? = null
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(id: String, x: Int, y: Int, name: Name?, labels: MutableList<Label>, urgent: Urgent?, committed: Committed?) : this() {
         this.id = id
         this.x = x

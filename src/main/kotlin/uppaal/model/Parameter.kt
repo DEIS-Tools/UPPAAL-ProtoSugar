@@ -8,6 +8,8 @@ class Parameter() : TextUppaalPojo {
     @field:Text
     override var content: String = ""
 
+    override var parent: UppaalPojo? = null
+
     constructor(content: String) : this() {
         this.content = content
     }

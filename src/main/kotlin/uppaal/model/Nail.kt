@@ -11,6 +11,8 @@ class Nail() : UppaalPojo {
     @field:Attribute(name = "y")
     var y: Int = 0
 
+    override var parent: UppaalPojo? = null
+
     constructor(x: Int, y: Int) : this() {
         this.x = x
         this.y = y

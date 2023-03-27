@@ -15,6 +15,9 @@ class Branchpoint() : UppaalPojo {
     var y: Int = 0
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(id: String, x: Int, y: Int) : this () {
         this.id = id
         this.x = x

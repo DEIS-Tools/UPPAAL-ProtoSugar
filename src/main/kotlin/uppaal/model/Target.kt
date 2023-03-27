@@ -8,6 +8,8 @@ class Target() : UppaalPojo {
     @field:Attribute(name = "ref")
     lateinit var ref: String
 
+    override var parent: UppaalPojo? = null
+
     constructor(ref: String) : this() {
         this.ref = ref
     }

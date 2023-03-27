@@ -16,6 +16,9 @@ open class Name() : TextUppaalPojo {
     final override var content: String = ""
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(x: Int, y: Int, content: String) : this() {
         this.x = x
         this.y = y

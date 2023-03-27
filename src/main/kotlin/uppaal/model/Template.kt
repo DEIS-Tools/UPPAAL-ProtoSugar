@@ -32,6 +32,9 @@ class Template() : UppaalPojo {
     var transitions: MutableList<Transition> = ArrayList()
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(name: Name,
                 parameter: Parameter?,
                 declaration: Declaration?,

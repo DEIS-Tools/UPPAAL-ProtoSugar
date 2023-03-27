@@ -29,6 +29,9 @@ class SubTemplateReference() : UppaalPojo {
     var height: Int = 0
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(name: Name?,
                 subtemplatename: SubTemplateName?,
                 boundarypoints: MutableList<BoundaryPoint>,

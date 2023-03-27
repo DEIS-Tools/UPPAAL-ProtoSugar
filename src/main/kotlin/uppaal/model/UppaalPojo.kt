@@ -1,3 +1,5 @@
 package uppaal.model
 
-interface UppaalPojo
+interface UppaalPojo {
+    var parent: UppaalPojo?
+}

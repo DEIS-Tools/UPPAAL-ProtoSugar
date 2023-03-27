@@ -27,6 +27,9 @@ class BoundaryPoint() : UppaalPojo {
     var name: Name? = null
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(id: String, x: Int, y: Int, kind: String, name: Name?) : this() {
         this.id = id
         this.x = x

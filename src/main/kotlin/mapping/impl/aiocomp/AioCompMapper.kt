@@ -31,12 +31,10 @@ class AioCompMapper : Mapper() {
             val info = index.register(template, path)
             val errors = ArrayList<UppaalMessage>()
 
-            if (info.subTemOrUser) {
-                if (info.trueName.isBlank())
-                    errors.add(blankSubTemplateUserError(path))
-                if (info.isRedefinition)
-                    errors.add(redefinitionError(path, info))
-            }
+            if (info.isRedefinition)
+                errors.add(redefinitionError(path, info))
+            if (info.subTemOrUser && info.trueName.isBlank())
+                errors.add(blankSubTemplateUserError(path))
 
             if (info.isSubTemplate) {
                 if (template.init != null)
@@ -88,7 +86,7 @@ class AioCompMapper : Mapper() {
             createUppaalError(path, "The name of a boundary point cannot be blank", isUnrecoverable = true)
 
         private fun redefinitionError(path: UppaalPath, info: TaTemplateInfo): UppaalMessage =
-            createUppaalError(path, "Redeclaration of a sub-template(-user) name: '${info.element.name.content}'", isUnrecoverable = true)
+            createUppaalError(path, "Redeclaration of a (sub-)template name: '${info.element.name.content}'", isUnrecoverable = true)
 
         private fun initError(path: UppaalPath): UppaalMessage =
             createUppaalError(path, "A sub-template cannot have an init-location", isUnrecoverable = true)
@@ -232,9 +230,13 @@ class AioCompMapper : Mapper() {
         private fun validateInstantiations(path: UppaalPath, system: System): List<UppaalMessage> {
             val errors = ArrayList<UppaalMessage>()
 
-            for (partialInst in partialInstConfre.findAll(system.content))
+            for (partialInst in partialInstConfre.findAll(system.content)) {
                 if (partialInst[3]!!.toString() in index.subTemplates)
                     errors.add(userCodeInstantiatesSubTemplateError(path, system.content, partialInst[3]!!.tree))
+
+                if (AioCompModelIndex.isSubTemplate(partialInst[0]!!.toString()))
+                    errors.add(partialInstantiationIsSubTemplateError(path, system.content, partialInst[0]!!.tree))
+            }
 
             for (fullInst in systemLineConfre.findAll(system.content)) {
                 val identNodes = fullInst[2]!!.children.map { it!![1]!![0] } + fullInst[1]!![0]
@@ -290,27 +292,62 @@ class AioCompMapper : Mapper() {
 
         private fun userCodeInstantiatesSubTemplateError(path: UppaalPath, code: String, node: ParseTree): UppaalMessage =
             createUppaalError(path, code, node, "User-code cannot instantiate a sub-template", isUnrecoverable = true)
+
+        private fun partialInstantiationIsSubTemplateError(path: UppaalPath, code: String, node: ParseTree): UppaalMessage =
+            createUppaalError(path, code, node, "A partial instantiation cannot be a sub-template", isUnrecoverable = true)
     }
 
 
     inner class InfixMapping(val index: AioCompModelIndex) : ModelPhase() {
+        private val partialInstConfre = parserBuilder.generateParser("PartialInst")
+        private val systemLineConfre = parserBuilder.generateParser("SystemLine")
+        private val trueToInfixedNames = HashMap<String, String>()
+
+
         init {
             register(::mapNta)
+            register(::mapSystemLine)
         }
 
 
         private fun mapNta(path: UppaalPath, nta: Nta): List<UppaalMessage> {
             for (rootInfo in index.rootSubTemUsers.values)
-                if (rootInfo.canBeMapped)
-                    nta.templates.add(SubTemplateInfixer.infix(rootInfo, index))
-
-            // TODO: Make system-index for name/simulation/etc. back-mapping
-            //  - But not for now
+                if (rootInfo.canBeMapped){
+                    val newTemplate = SubTemplateInfixer.infix(rootInfo, index)
+                    nta.templates.add(newTemplate)
+                    trueToInfixedNames[rootInfo.trueName] = newTemplate.name.content
+                }
 
             // TODO: What to do about sub-templates(-users)? Remove them (must map errors from infix to original) or keep them (must remove non-native concepts in a guaranteed, non-disruptive manner)
             nta.templates.removeAll(index.taTemplates.values.filter { it.subTemOrUser }.map { it.element }) // Remove all for now
 
-            return listOf()
+            return emptyList()
+        }
+
+        /** Replaces top-level sub-template user-names with "infix names" and make back-map to original system configuration **/
+        private fun mapSystemLine(path: UppaalPath, system: System): List<UppaalMessage> {
+            // TODO: Data-structure to make system-back-map (AioCompSystemIndex?)
+
+            val rewriter = getRewriter(path, system.content)
+
+            for (partialInst in partialInstConfre.findAll(system.content)) {
+                val infixName = trueToInfixedNames[AioCompModelIndex.trueName(partialInst[3]!!.toString())] ?: continue
+                rewriter.replace(partialInst[3]!!.fullRange, infixName)
+            }
+
+            for (fullInst in systemLineConfre.findAll(rewriter.originalText)) {
+                val identNodes = fullInst[2]!!.children.map { it!![1]!![0] } + fullInst[1]!![0]
+                for (identNode in identNodes.filterNotNull()) {
+                    val infixName = trueToInfixedNames[AioCompModelIndex.trueName(identNode.toString())] ?: continue
+                    rewriter.replace(identNode.fullRange, infixName)
+
+                    // TODO: Make system-index for name/simulation/etc. back-mapping
+                    //  - But not for now
+                }
+            }
+
+            system.content = rewriter.getRewrittenText()
+            return emptyList()
         }
     }
 }

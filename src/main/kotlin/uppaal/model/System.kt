@@ -7,4 +7,6 @@ import org.simpleframework.xml.Text
 class System : TextUppaalPojo {
     @field:Text
     override var content: String = ""
+
+    override var parent: UppaalPojo? = null
 }

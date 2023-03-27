@@ -7,7 +7,11 @@ import kotlin.collections.LinkedHashMap
 import kotlin.reflect.KClass
 
 data class AddTerminal(val name: String, val pattern: String)
-data class AddNonTerminal(val name: String, val grammar: String, val sourceMapper: KClass<out Mapper>? = null)
+data class AddNonTerminal(val name: String, val grammar: String, val sourceMapper: KClass<out Mapper>? = null) {
+    init {
+        assert(grammar.endsWith('.')) { "Non-terminal grammar must end with a 'dot'" }
+    }
+}
 data class ForkNonTerminal(val baseNonTerminal: String, val newName: String, val sourceMapper: KClass<out Mapper>)
 
 data class ExtendNonTerminal(val extendedNonTerminal: String, val position: List<Int>, val nonTerminalToInsert: String, val type: ExtensionGrammarType, val sourceMapper: KClass<out Mapper>)
@@ -56,8 +60,7 @@ class SyntaxRegistry {
         AddNonTerminal("Struct",        "'struct' '{' StructField {StructField} '}' ."),
         AddNonTerminal("StructField",   "Type IDENT Subscripts {',' IDENT Subscripts} ';' ."),
 
-
-        AddNonTerminal("PartialInst",  "IDENT ['(' ParamList ')'] '=' IDENT '(' ArgList ')' ';'"),
+        AddNonTerminal("PartialInst",  "IDENT ['(' ParamList ')'] '=' IDENT '(' ArgList ')' ';' ."),
         AddNonTerminal("SystemLine",   "'system' [IDENT] {',' [IDENT]} ';'."),
 
         //AddNonTerminal("", ""),

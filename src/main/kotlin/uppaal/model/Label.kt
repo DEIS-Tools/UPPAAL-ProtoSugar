@@ -25,6 +25,8 @@ class Label() : TextUppaalPojo {
     @field:Text
     override var content: String = ""
 
+    override var parent: UppaalPojo? = null
+
     constructor(kind: String, x: Int, y: Int, content: String = "") : this() {
         this.kind = kind
         this.x = x

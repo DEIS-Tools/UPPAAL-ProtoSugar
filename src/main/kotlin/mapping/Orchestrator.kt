@@ -6,6 +6,7 @@ import uppaal.messaging.UppaalMessage
 import uppaal.UppaalPath
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
+import uppaal.ModelSerializer
 import uppaal.messaging.UppaalMessageException
 import uppaal.model.Nta
 import uppaal.model.Template
@@ -17,7 +18,6 @@ import kotlin.jvm.Throws
 
 // Elements in the "XML-tree" are visited in pre-order.
 class Orchestrator(private val mappers: List<Mapper>) {
-    private val serializer: Serializer = Persister()
     private val syntaxRegistry = SyntaxRegistry()
 
     private var modelPhases: ArrayList<ModelPhase>? = null
@@ -34,21 +34,15 @@ class Orchestrator(private val mappers: List<Mapper>) {
 
 
     fun mapModel(stream: InputStream): Pair<String, List<UppaalMessage>>
-        = stream.bufferedReader().use { return mapModel(it.readText()) }
+        = stream.bufferedReader().use { mapModel(it.readText()) }
     fun mapModel(uppaalXml: String): Pair<String, List<UppaalMessage>> {
-        val beforeNtaText = uppaalXml.substringBefore("<nta>")
-        val ntaText = uppaalXml.substring(uppaalXml.indexOf("<nta>"))
+        val nta = ModelSerializer.deserialize(uppaalXml)
 
-        val nta = serializer.read(Nta::class.java, ntaText)
         val errors = runModelMappers(nta)
         if (errors.any { it.isUnrecoverable })
             return Pair(uppaalXml, errors)
 
-        StringWriter().use {
-            serializer.write(nta, it)
-            val newModel = beforeNtaText + it.buffer.toString()
-            return Pair(newModel, errors)
-        }
+        return Pair(ModelSerializer.serialize(nta), errors)
     }
     private fun runModelMappers(nta: Nta): List<UppaalMessage> {
         val errors = ArrayList<UppaalMessage>()

@@ -24,6 +24,9 @@ class Transition() : UppaalPojo { // Primary constructor needed for XML deserial
     var nails: MutableList<Nail> = ArrayList()
 
 
+    override var parent: UppaalPojo? = null
+
+
     constructor(id: String, source: Source, target: Target, labels: MutableList<Label> = arrayListOf(), nails: MutableList<Nail> = arrayListOf()) : this() {
         this.id = id
         this.source = source

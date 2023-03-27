@@ -14,13 +14,13 @@ class SubTemplateInfixer {
             result.name.content = "_infixed_${info.trueName}"
             result.init = info.element.init?.clone()
             result.parameter = info.element.parameter?.clone()
-            result.declaration = info.element.declaration?.clone() // TODO: Remove since "flatten" or "merge" should do this
+            result.declaration = info.element.declaration?.clone() // TODO: Remove since "flatten" or "merge" should do this, but better
             result.subtemplatereferences.clear()
             result.boundarypoints.clear()
 
             // Trim transitions/paths that start or end in a boundary point (and thus do not actually exist)
-            val locationIDs = result.locations.map { it.id }.toSet()
-            result.transitions.removeAll { it.source.ref !in locationIDs || it.target.ref !in locationIDs }
+            val locationAndBranchPointIDs = (result.locations.map { it.id } + result.branchpoints.map { it.id }).toSet()
+            result.transitions.removeAll { it.source.ref !in locationAndBranchPointIDs || it.target.ref !in locationAndBranchPointIDs }
 
             return result
         }
@@ -45,7 +45,7 @@ class SubTemplateInfixer {
                 merge(result, flatSub, boundaryInfo, listOf(instanceName))
             }
 
-            // TODO: Later -> store back-mapping information somewhere
+            // TODO: Later -> store back-mapping information in AioCompModelIndex
             return result
         }
 
@@ -68,7 +68,7 @@ class SubTemplateInfixer {
                     val newTransition = Transition()
                     determineIdOfSourceAndTarget(partial, newTransition, declPrefix)
 
-                    // TODO: Merge labels
+                    // TODO: Merge labels (requires scope knowledge)
 
                     parent.transitions.add(newTransition)
                 }

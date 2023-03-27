@@ -14,4 +14,8 @@ class Nta : UppaalPojo {
 
     @field:Element(name = "system")
     lateinit var system: System
+
+
+    lateinit var schemaInfo: String
+    override var parent: UppaalPojo? = null
 }
