@@ -1,4 +1,4 @@
-package tools.indexing
+package tools.indexing.text
 
 import tools.parsing.GuardedParseTree
 import uppaal.model.TextUppaalPojo
@@ -6,4 +6,6 @@ import uppaal.model.TextUppaalPojo
 interface Textual {
     val parseTree: GuardedParseTree
     val source: TextUppaalPojo
+
+    fun getOriginalText() = source.content.substring(parseTree.fullRange)
 }

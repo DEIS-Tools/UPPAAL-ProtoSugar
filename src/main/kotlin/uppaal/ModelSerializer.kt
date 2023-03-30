@@ -3,7 +3,7 @@ package uppaal
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
 import uppaal.model.Nta
-import uppaal.visitors.ParentVisitor
+import uppaal.walkers.ParentModelWalker
 import java.io.StringWriter
 
 class ModelSerializer {
@@ -17,7 +17,7 @@ class ModelSerializer {
 
             val nta = serializer.read(Nta::class.java, ntaText)
             nta.schemaInfo = modelString.substring(0, ntaStart)
-            ParentVisitor().visit(nta)
+            ParentModelWalker().doWalk(nta)
 
             return nta
         }

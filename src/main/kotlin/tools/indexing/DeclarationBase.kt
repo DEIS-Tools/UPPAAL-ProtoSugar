@@ -1,32 +1,25 @@
 package tools.indexing
 
-// TODO: How to know how scopes relate to a model? How to index/search?
-//  Cannot be done with a UppaalPath. What if we have the fields/scope of a function, partial instantiation, or edge?
+import tools.indexing.text.FieldDecl
 
-abstract class DeclarationBase(val identifier: String?) {
-    private val _subElements = mutableListOf<DeclarationBase>() // Order of elements may affect visibility
-
-    val subElements: List<DeclarationBase> get() = _subElements
-    var parent: DeclarationBase? = null
+abstract class DeclarationBase(val identifier: String?, parent: DeclarationHolder) : DeclarationHolder() {
+    var parent: DeclarationHolder = parent
         private set
 
-    fun add(element: DeclarationBase): Boolean {
-        assert(element.parent != null) { "Tried to re-associate a Scope ${element.identifier}" }
-        if (element in _subElements)
-            return false
-        element.parent = this
-        return _subElements.add(element)
+
+    init {
+        associateTo(parent)
     }
 
 
-    // TODO: May require different resolve-strategies
-    /** Based on the current scope/declaration, find the declaration that "first" matches the given identifier **/
-    fun <T> resolve(identifier: String): DeclarationBase? {
-        return null
+    fun associateTo(element: DeclarationHolder) {
+        if (this !in element.subDeclarations)
+            element.add(this)
+        else
+            parent = element
     }
 
-    /** Find an identifier based on "something" **/
-    fun <T> find(/* Something */): DeclarationBase? {
-        return null
-    }
+
+    final override fun <T : FieldDecl> resolveField(identifier: String, relativeTo: DeclarationBase?, targetClass: Class<T>): T?
+            = resolveFieldLocal(identifier, relativeTo, targetClass) ?: parent.resolveField(identifier, this, targetClass)
 }

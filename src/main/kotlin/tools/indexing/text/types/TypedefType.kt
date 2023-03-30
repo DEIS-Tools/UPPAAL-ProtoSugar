@@ -1,5 +1,5 @@
-package tools.indexing.types
+package tools.indexing.text.types
 
-import tools.indexing.textual.TypedefDecl
+import tools.indexing.text.TypedefDecl
 
 class TypedefType(modifier: Modifier?, val typedefDecl: TypedefDecl) : Type(modifier)

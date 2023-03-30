@@ -1,18 +1,12 @@
 package mapping
 
 import mapping.base.*
+import tools.indexing.IndexingModelWalker
 import tools.parsing.SyntaxRegistry
 import uppaal.messaging.UppaalMessage
-import uppaal.UppaalPath
-import org.simpleframework.xml.Serializer
-import org.simpleframework.xml.core.Persister
 import uppaal.ModelSerializer
 import uppaal.messaging.UppaalMessageException
-import uppaal.model.Nta
-import uppaal.model.Template
-import uppaal.model.Transition
 import java.io.InputStream
-import java.io.StringWriter
 import java.lang.Exception
 import kotlin.jvm.Throws
 
@@ -28,8 +22,9 @@ class Orchestrator(private val mappers: List<Mapper>) {
 
     init {
         for (mapper in mappers)
-            mapper.setRegistry(syntaxRegistry)
+            mapper.registerExtensions(syntaxRegistry)
         syntaxRegistry.postValidation()
+        // TODO: Configure declaration parser handlers
     }
 
 
@@ -37,27 +32,22 @@ class Orchestrator(private val mappers: List<Mapper>) {
         = stream.bufferedReader().use { mapModel(it.readText()) }
     fun mapModel(uppaalXml: String): Pair<String, List<UppaalMessage>> {
         val nta = ModelSerializer.deserialize(uppaalXml)
-
-        val errors = runModelMappers(nta)
-        if (errors.any { it.isUnrecoverable })
-            return Pair(uppaalXml, errors)
-
-        return Pair(ModelSerializer.serialize(nta), errors)
-    }
-    private fun runModelMappers(nta: Nta): List<UppaalMessage> {
         val errors = ArrayList<UppaalMessage>()
-
-        modelPhases = ArrayList()
         val newSimulatorPhases = ArrayList<SimulatorPhase>()
         val newQueryPhases = ArrayList<QueryPhase>()
 
-        for (mapperPhases in mappers.map { it.getPhases() }) {
+        val model = IndexingModelWalker(syntaxRegistry).buildIndex(nta)
+
+        clearCache()
+        modelPhases = ArrayList()
+        for (mapperPhases in mappers.map { it.buildAndConfigurePhases(syntaxRegistry, model) }) {
             for (phase in mapperPhases.modelPhases) {
                 phase.phaseIndex = modelPhases!!.size
-                errors.addAll(visitNta(nta, UppaalPath(nta), phase).onEach { it.phaseIndex = phase.phaseIndex })
-                if (errors.any { it.isUnrecoverable })
-                    return errors
                 modelPhases!!.add(phase)
+
+                errors.addAll(phase.run(nta).onEach { it.phaseIndex = phase.phaseIndex })
+                if (errors.any { it.isUnrecoverable })
+                    return Pair(uppaalXml, errors)
             }
 
             mapperPhases.simulatorPhase?.let { it.phaseIndex = newSimulatorPhases.size; newSimulatorPhases.add(it) }
@@ -69,37 +59,8 @@ class Orchestrator(private val mappers: List<Mapper>) {
             queryPhases = newQueryPhases
         }
 
-        return errors
+        return Pair(ModelSerializer.serialize(nta), errors)
     }
-    private fun visitNta(nta: Nta, path: UppaalPath, phase: ModelPhase): List<UppaalMessage> =
-        phase.visit(path, nta).plus(phase.visit(path.extend(nta.declaration), nta.declaration))
-            .plus(
-                nta.templates.withIndex().flatMap { visitTemplate(it.value, path.plus(it), phase) }
-            )
-            .plus(phase.visit(path.extend(nta.system), nta.system))
-    private fun visitTemplate(template: Template, path: UppaalPath, phase: ModelPhase): List<UppaalMessage> =
-        phase.visit(path, template).asSequence()
-            .plus(phase.visit(path.extend(template.name), template.name))
-            .plus((template.parameter?.let { phase.visit(path.extend(it), it) } ?: listOf()))
-            .plus(template.declaration?.let { phase.visit(path.extend(it), it) } ?: listOf())
-            .plus(
-                template.locations.withIndex().flatMap { phase.visit(path.plus(it), it.value) }
-            )
-            .plus(
-                template.branchpoints.withIndex().flatMap { phase.visit(path.plus(it), it.value) }
-            )
-            .plus(
-                template.boundarypoints.withIndex().flatMap { phase.visit(path.plus(it), it.value) }
-            )
-            .plus(
-                template.subtemplatereferences.withIndex().flatMap { phase.visit(path.plus(it), it.value) } // TODO: Maybe visit boundary-points of reference?
-            )
-            .plus(
-                template.transitions.withIndex().flatMap { visitTransition(it.value, path.plus(it), phase) }
-            ).toList()
-    private fun visitTransition(transition: Transition, path: UppaalPath, phase: ModelPhase): List<UppaalMessage> =
-        phase.visit(path, transition)
-            .plus(transition.labels.withIndex().flatMap { phase.visit(path.plus(it), it.value) })
 
     /** Back-map errors from a model onto the original model text/structure. Phases are reversed since "the latest mapping must
      * be undone first". An error is only affected by a phase is "error.phaseIndex > phase.phaseIndex", thus the filter. **/

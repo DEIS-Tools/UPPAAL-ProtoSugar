@@ -1,5 +1,6 @@
 package mapping.impl.aiocomp
 
+import tools.indexing.tree.Model
 import uppaal.UppaalPath
 import uppaal.model.BoundaryPoint
 import uppaal.model.SubTemplateReference
@@ -88,7 +89,7 @@ class TaTemplateInfo(
 }
 
 
-class AioCompModelIndex {
+class AioCompModelIndex() {
     companion object {
         @JvmStatic
         fun isSubTemplate(template: Template): Boolean
@@ -102,6 +103,8 @@ class AioCompModelIndex {
         fun trueName(name: String): String
                 = (if (isSubTemplate(name)) name.drop(2) else name).trim()
     }
+
+    lateinit var model: Model
 
     val taTemplates = LinkedHashMap<String, TaTemplateInfo>()
     val subTemplates = LinkedHashMap<String, TaTemplateInfo>()

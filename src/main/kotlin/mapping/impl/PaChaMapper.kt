@@ -5,7 +5,7 @@ import createOrGetRewriter
 import joinInsert
 import mapping.base.Mapper
 import mapping.base.ModelPhase
-import mapping.base.PhaseOutput
+import mapping.base.Phases
 import tools.restructuring.ActivationRule
 import tools.restructuring.BackMapResult
 import tools.restructuring.TextRewriter
@@ -35,8 +35,8 @@ class PaChaMapper : Mapper() {
         """.trimIndent())
 
 
-    override fun getPhases(): PhaseOutput
-        = PhaseOutput(listOf(Phase1()), null, null)
+    override fun buildPhases(): Phases
+        = Phases(listOf(Phase1()), null, null)
 
 
     private inner class Phase1 : ModelPhase()

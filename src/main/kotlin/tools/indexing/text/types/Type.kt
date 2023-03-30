@@ -1,3 +1,3 @@
-package tools.indexing.types
+package tools.indexing.text.types
 
 abstract class Type(val modifier: Modifier?)

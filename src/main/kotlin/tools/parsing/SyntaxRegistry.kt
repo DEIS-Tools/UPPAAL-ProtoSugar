@@ -30,8 +30,8 @@ class SyntaxRegistry {
 
     private val nonTerminals = mutableListOf(
         AddNonTerminal("Declaration",   "VarOrFunction | Typedef ."),
-        AddNonTerminal("VarOrFunction", "Type IDENT (Subscripts ['=' (Expression | ArrayInit)] ';' | '(' ParamList ')' Body) ."),
-        AddNonTerminal("Typedef",       "'typedef' Type IDENT ';' ."),
+        AddNonTerminal("VarOrFunction", "Type IDENT (Subscripts ['=' (Expression | ArrayInit)] ';' | '(' ParamList ')' Body) ."), // TODO: Allow chained declarations (e.g., "int i, j, k;")
+        AddNonTerminal("Typedef",       "'typedef' Type IDENT Subscripts ';' ."),
 
         AddNonTerminal("ArrayInit",     "'{' [ArrayInitTerm] {',' [ArrayInitTerm]} '}' ."),
         AddNonTerminal("ArrayInitTerm", "ArrayInit | Expression ."),

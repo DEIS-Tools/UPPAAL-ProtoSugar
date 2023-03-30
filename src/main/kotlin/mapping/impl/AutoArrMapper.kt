@@ -2,21 +2,20 @@ package mapping.impl
 
 import mapping.base.*
 import tools.indexing.DeclarationBase
+import tools.indexing.DeclarationHolder
 import tools.restructuring.ActivationRule
 import tools.restructuring.TextRewriter
-import tools.indexing.tree.ScopeDecl
-import tools.indexing.textual.VariableDecl
-import tools.indexing.tree.RootScope
-import tools.indexing.types.Const
-import tools.indexing.types.IntType
+import tools.indexing.tree.TemplateDecl
+import tools.indexing.text.VariableDecl
+import tools.indexing.tree.Model
+import tools.indexing.text.types.Const
+import tools.indexing.text.types.IntType
 import tools.parsing.GuardedParseTree
+import tools.parsing.ParseTree
 import uppaal.messaging.UppaalMessage
 import uppaal.UppaalPath
 import uppaal.messaging.createUppaalError
-import uppaal.model.Declaration
-import uppaal.model.System
-import uppaal.model.Template
-import uppaal.model.TextUppaalPojo
+import uppaal.model.*
 
 class AutoArrMapper : Mapper() {
     override val registerSyntax: RegistryBuilder.() -> Unit = {
@@ -26,55 +25,57 @@ class AutoArrMapper : Mapper() {
         //                                                  NEW -> ---------
     }
 
-    override fun getPhases()
-        = PhaseOutput(listOf(Phase1()), null, null)
+    override fun buildPhases()
+        = Phases(listOf(Phase1()), null, null)
 
-    val globalScope = RootScope()
 
 
     private inner class Phase1 : ModelPhase()
     {
-        private val declarationConfre = parserBuilder.generateParser("Declaration")
+        private lateinit var globalScope: Model
+
+        private val declarationConfre by lazy { generateParser("Declaration") }
 
 
-        init {
+        override fun onConfigured() {
+            register(::mapNta)
             register(::mapDeclaration)
             register(::mapSystem)
         }
 
 
-        private fun mapDeclaration(path: UppaalPath, declaration: Declaration): List<UppaalMessage> {
+        private fun mapNta(path: UppaalPath, nta: Nta) {
+            globalScope = Model(nta)
+        }
+
+        private fun mapDeclaration(path: UppaalPath, declaration: Declaration) {
             val rewriter = getRewriter(path, declaration.content)
             val scope = when (path.size) {
                 2 -> globalScope
-                3 -> ScopeDecl((path[1].element as Template).name.content, path[1].element, globalScope)
+                3 -> TemplateDecl((path[1].element as Template).name.content, globalScope, path[1].element as Template)
                 else -> throw Exception("Unexpected path length '${path.size}' leading to a Declaration UppaalPojo")
             }
 
-            val errors = doMapping(rewriter, path, scope)
+            doMapping(rewriter, path, scope)
             declaration.content = rewriter.getRewrittenText()
-            return errors
         }
 
-        private fun mapSystem(path: UppaalPath, system: System): List<UppaalMessage> {
+        private fun mapSystem(path: UppaalPath, system: System) {
             val rewriter = getRewriter(path, system.content)
-            val errors = doMapping(rewriter, path, globalScope)
+            doMapping(rewriter, path, globalScope)
             system.content = rewriter.getRewrittenText()
-            return errors
         }
 
-        private fun doMapping(rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationBase): List<UppaalMessage> {
-            val errors = ArrayList<UppaalMessage>()
+        private fun doMapping(rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationHolder) {
             for (decl in declarationConfre.findAll(rewriter.originalText)) {
                 val varNode = decl.findLocal("VarOrFunction") ?: continue
                 if (varNode.localFullySafe)
                     if (!tryRegisterConstInt(varNode, path.last().element as TextUppaalPojo, rewriter, scopeDecl))
-                        errors.addAll(tryParseAutoArray(varNode, rewriter, path, scopeDecl))
+                        tryParseAutoArray(varNode, rewriter, path, scopeDecl)
             }
-            return errors
         }
 
-        private fun tryRegisterConstInt(varNode: GuardedParseTree, source: TextUppaalPojo, rewriter: TextRewriter, scopeDecl: DeclarationBase): Boolean {
+        private fun tryRegisterConstInt(varNode: GuardedParseTree, source: TextUppaalPojo, rewriter: TextRewriter, scopeDecl: DeclarationHolder): Boolean {
             // Check if "non-array instantiation" // TODO: Parse all declarations (using "Declaration parser (mapper)????")
             val exprNode = varNode[2]!!.findLocal("Expression") ?: return false
             if (!varNode[2]!![0]!!.isBlank) // Ensure no subscript/array-notation
@@ -92,29 +93,28 @@ class AutoArrMapper : Mapper() {
             // Register if value ís valid integer
             val value = rewriter.originalText.substring(exprNode.fullRange).toIntOrNull() ?: return false
             val identifier = varNode[1]!!.toString()
-            scopeDecl.add(VariableDecl(identifier, varNode, source, IntType(Const()), defaultValue = value))
+            VariableDecl(identifier, scopeDecl, varNode, source, IntType(Const()), defaultValue = value)
             return true
         }
 
-        private fun tryParseAutoArray(varNode: GuardedParseTree, rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationBase): List<UppaalMessage> {
+        private fun tryParseAutoArray(varNode: GuardedParseTree, rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationHolder) {
             // Check if "array with auto-syntax"
-            val arrayInitNode = varNode[2]!!.findLocal("ArrayInit") ?: return listOf()
-            val autoArrNode = arrayInitNode[3]!!.findLocal("AutoArr") ?: return listOf()
+            val arrayInitNode = varNode[2]!!.findLocal("ArrayInit") ?: return
+            val autoArrNode = arrayInitNode[3]!!.findLocal("AutoArr") ?: return
             val subscriptNode = varNode[2]!![0]!!
             if (subscriptNode.isBlank || !subscriptNode.localFullySafe || !arrayInitNode.localFullySafe)
-                return listOf()
+                return
 
             // Check if "int or bool type array"
-            val nonStructNode = varNode[0]!!.findLocal("NonStruct") ?: return listOf()
+            val nonStructNode = varNode[0]!!.findLocal("NonStruct") ?: return
             if (!nonStructNode.localFullySafe || nonStructNode[0]!!.toString() !in arrayOf("int", "bool"))
-                return listOf()
+                return
 
             // Compute values needed for mapping
             val dimSizes = getDimensionSizes(subscriptNode, scopeDecl)
             val dimVars  = getDimensionVariables(arrayInitNode, autoArrNode)
-            val errors = handleDimensionErrors(dimSizes, dimVars, path, rewriter.originalText, varNode)
-            if (errors.isNotEmpty())
-                return errors
+            if (checkForErrors(dimSizes, dimVars, path, rewriter.originalText, varNode))
+                return
 
             // Map and rewrite
             val defaultExprNode = autoArrNode[1]!![0]!!
@@ -136,18 +136,18 @@ class AutoArrMapper : Mapper() {
                 .activateOn(replacement.indices, ActivationRule.INTERSECTS)
                 .overrideErrorRange { varNode.fullRange }
 
-            return listOf()
+            return
         }
 
 
-        private fun getDimensionSizes(subscriptNode: GuardedParseTree, scopeDecl: DeclarationBase): List<Int?> {
+        private fun getDimensionSizes(subscriptNode: GuardedParseTree, scopeDecl: DeclarationHolder): List<Int?> {
             val sizeExprNodes = subscriptNode[0]!!.children.map { it?.findLocal("Expression") }
             return sizeExprNodes.map {
                 val expr = it?.toStringNotNull() // TODO: Use "expression evaluator" instead
                 if (expr == null)
                     null
                 else
-                    expr.toIntOrNull() ?: throw Exception("Broken rn") //(scopeDecl[expr] as? VariableDecl)?.defaultValue as? Int
+                    expr.toIntOrNull() ?: throw Exception("Broken rn") //(scopeDecl[expr] as? VariableDecl)?.defaultValue as? Int // TODO: Fix this
             }
         }
 
@@ -166,45 +166,26 @@ class AutoArrMapper : Mapper() {
             return dimVars
         }
 
-        private fun handleDimensionErrors(dimSizes: List<Int?>, dimVars: List<String?>, path: UppaalPath, code: String, varNode: GuardedParseTree): List<UppaalMessage> {
+        private fun checkForErrors(dimSizes: List<Int?>, dimVars: List<String?>, path: UppaalPath, code: String, varNode: GuardedParseTree): Boolean {
             val errors = ArrayList<UppaalMessage>()
             val identNode = varNode[1]!!.tree
             if (dimSizes.isEmpty())
-                errors.add(
-                    createUppaalError(
-                    path, code, identNode, "AutoArr-syntax requires at least one array dimension on variable '${identNode}'.", true
-                )
-                )
+                errors.add(noDimensionsError(path, code, identNode))
             else if (dimVars.size != dimSizes.size)
-                errors.add(
-                    createUppaalError(
-                    path, code, identNode, "Array '${identNode}' must have an equal number of dimensions and dimension variables.", true
-                )
-                )
+                errors.add(mismatchingDimensionsAndVariablesError(path, code, identNode))
 
             val subscriptNode = varNode[2]!![0]!!.tree
             for (size in dimSizes.withIndex())
                 if (size.value == null)
-                    errors.add(
-                        createUppaalError(
-                        path, code, subscriptNode, "Cannot determine size of array dimension ${size.index+1} of ${dimSizes.size} in array '${identNode}'.", true
-                    )
-                    )
+                    errors.add(cannotDetermineDimensionSizeError(path, code, identNode, subscriptNode, size, dimSizes.size))
                 else if (size.value!! <= 0)
-                    errors.add(
-                        createUppaalError(
-                        path, code, subscriptNode, "Array dimension ${size.index+1} of ${dimSizes.size} in array '${identNode}' has non-positive size.", true
-                    )
-                    )
+                    errors.add(nonPositiveDimensionSizeError(path, code, subscriptNode, size, dimSizes, identNode))
 
             if (dimVars.filter { it != "" }.distinct().size != dimVars.filter { it != "" }.size)
-                errors.add(
-                    createUppaalError( // TODO: Fix so that error is put on the correct spot
-                    path, code, identNode, "Array '${identNode}' has duplicate dimension variable names.", true
-                )
-                )
+                errors.add(duplicateDimensionLabelsError(path, code, identNode))
 
-            return errors
+            reportAll(errors)
+            return errors.isNotEmpty()
         }
 
         private fun computeReplacement(sizesAndVars: List<Pair<Int, String>>, defaultExpr: String): String {
@@ -226,5 +207,17 @@ class AutoArrMapper : Mapper() {
             val singleDimPattern = Regex("""(?>[^_a-zA-Z0-9]|^)($currDimVar)(?>[^_a-zA-Z0-9\[]|$)""")
             return singleDimPattern.replace(value) { it.value.replace(currDimVar, index.toString()) }
         }
+
+
+        private fun mismatchingDimensionsAndVariablesError(path: UppaalPath, code: String, identNode: ParseTree) =
+            createUppaalError(path, code, identNode, "Array '${identNode}' must have an equal number of dimensions and dimension variables.", true)
+        private fun noDimensionsError(path: UppaalPath, code: String, identNode: ParseTree) =
+            createUppaalError(path, code, identNode, "AutoArr-syntax requires at least one array dimension on variable '${identNode}'.", true)
+        private fun cannotDetermineDimensionSizeError(path: UppaalPath, code: String, identNode: ParseTree, subscriptNode: ParseTree, element: IndexedValue<Int?>, size: Int) =
+            createUppaalError(path, code, subscriptNode, "Cannot determine size of array dimension ${element.index+1} of $size in array '${identNode}'.", true)
+        private fun nonPositiveDimensionSizeError(path: UppaalPath, code: String, subscriptNode: ParseTree, size: IndexedValue<Int?>, dimSizes: List<Int?>, identNode: ParseTree) =
+            createUppaalError(path, code, subscriptNode, "Array dimension ${size.index + 1} of ${dimSizes.size} in array '${identNode}' has non-positive size.", true)
+        private fun duplicateDimensionLabelsError(path: UppaalPath, code: String, identNode: ParseTree) =
+            createUppaalError(path, code, identNode, "Array '${identNode}' has duplicate dimension variable names.", true)
     }
 }

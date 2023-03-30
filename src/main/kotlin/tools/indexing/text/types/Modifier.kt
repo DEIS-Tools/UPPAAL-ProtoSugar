@@ -1,4 +1,4 @@
-package tools.indexing.types
+package tools.indexing.text.types
 
 abstract class Modifier(val name: String)
 

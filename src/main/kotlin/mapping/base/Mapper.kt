@@ -1,25 +1,55 @@
 package mapping.base
 
+import tools.indexing.tree.Model
 import tools.parsing.SyntaxRegistry
+import uppaal.messaging.UppaalMessage
+import kotlin.reflect.KClass
 
 
-data class PhaseOutput(val modelPhases: List<ModelPhase>, val simulatorPhase: SimulatorPhase?, val queryPhase: QueryPhase?)
+data class Phases(val modelPhases: List<ModelPhase>, val simulatorPhase: SimulatorPhase?, val queryPhase: QueryPhase?)
 
 abstract class Mapper {
-    open val registerSyntax: (RegistryBuilder.() -> Unit)? = null
-    protected lateinit var parserBuilder: ParserBuilder private set
+    protected open val registerSyntax: (RegistryBuilder.() -> Unit)? = null
 
-    fun setRegistry(syntaxRegistry: SyntaxRegistry) {
+    fun registerExtensions(syntaxRegistry: SyntaxRegistry) {
         registerSyntax?.invoke(RegistryBuilder(this, syntaxRegistry))
-        parserBuilder = ParserBuilder(this, syntaxRegistry)
+        // TODO: configure "declaration registry"?
     }
 
-    abstract fun getPhases(): PhaseOutput
+    fun buildAndConfigurePhases(registry: SyntaxRegistry, model: Model): Phases {
+        return buildPhases().apply {
+            modelPhases.forEach { it.configure(this@Mapper::class, registry, model) }
+            simulatorPhase?.configure(this@Mapper::class, registry, model)
+            queryPhase?.configure(this@Mapper::class, registry, model)
+        }
+    }
+
+    protected abstract fun buildPhases(): Phases
 }
 
 abstract class PhaseBase {
     /** Do not touch! Here be dragons! **/
     var phaseIndex = -1
+
+    private var configured = false
+    private lateinit var mapper: KClass<out Mapper>
+    private lateinit var registry: SyntaxRegistry
+    protected lateinit var model: Model
+
+    open fun configure(mapper: KClass<out Mapper>, registry: SyntaxRegistry, model: Model) {
+        if (configured) throw Exception("Can only configure once")
+        this.mapper = mapper
+        this.registry = registry
+        this.model = model
+        configured = true
+    }
+
+    protected open fun onConfigured() { }
+
+    protected abstract fun report(message: UppaalMessage)
+
+    protected fun generateParser(rootNonTerminal: String) =
+        registry.generateParser(rootNonTerminal, mapper)
 }
 
 
@@ -34,9 +64,4 @@ class RegistryBuilder(private val mapper: Mapper, private val registry: SyntaxRe
             = registry.insertOptional(baseNonTerminal, insertPosition, nonTerminalToInsert, mapper.javaClass.kotlin)
     fun insertMultiple(baseNonTerminal: String, insertPosition: List<Int>, nonTerminalToInsert: String)
             = registry.insertMultiple(baseNonTerminal, insertPosition, nonTerminalToInsert, mapper.javaClass.kotlin)
-}
-
-class ParserBuilder(private val mapper: Mapper, private val registry: SyntaxRegistry) {
-    fun generateParser(rootNonTerminal: String)
-            = registry.generateParser(rootNonTerminal, mapper.javaClass.kotlin)
 }

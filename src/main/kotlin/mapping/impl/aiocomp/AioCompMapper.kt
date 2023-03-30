@@ -2,7 +2,7 @@ package mapping.impl.aiocomp
 
 import mapping.base.Mapper
 import mapping.base.ModelPhase
-import mapping.base.PhaseOutput
+import mapping.base.Phases
 import tools.parsing.ParseTree
 import uppaal.UppaalPath
 import uppaal.messaging.UppaalMessage
@@ -10,10 +10,10 @@ import uppaal.messaging.createUppaalError
 import uppaal.model.*
 
 class AioCompMapper : Mapper() {
-    override fun getPhases(): PhaseOutput {
+    override fun buildPhases(): Phases {
         val index = AioCompModelIndex()
 
-        return PhaseOutput(
+        return Phases(
             listOf(ModelIndexing(index), ReferenceValidation(index), InfixMapping(index)),
             null,
             null
@@ -22,12 +22,13 @@ class AioCompMapper : Mapper() {
 
 
     inner class ModelIndexing(val index: AioCompModelIndex) : ModelPhase() {
-        init {
-            register(::mapTemplate)
+        override fun onConfigured() {
+            index.model = model
+            register(::indexTemplate)
         }
 
 
-        private fun mapTemplate(path: UppaalPath, template: Template): List<UppaalMessage> {
+        private fun indexTemplate(path: UppaalPath, template: Template) {
             val info = index.register(template, path)
             val errors = ArrayList<UppaalMessage>()
 
@@ -75,7 +76,7 @@ class AioCompMapper : Mapper() {
             // TODO: Later -> register declarations (parameters, variables, functions, locations, boundary points, sub-template references)
 
             info.hasPassedIndexing = errors.isEmpty()
-            return errors
+            reportAll(errors)
         }
 
 
@@ -111,20 +112,20 @@ class AioCompMapper : Mapper() {
 
 
     inner class ReferenceValidation(val index: AioCompModelIndex) : ModelPhase() {
-        private val partialInstConfre = parserBuilder.generateParser("PartialInst")
-        private val systemLineConfre = parserBuilder.generateParser("SystemLine")
+        private val partialInstConfre by lazy { generateParser("PartialInst") }
+        private val systemLineConfre by lazy { generateParser("SystemLine") }
 
 
-        init {
+        override fun onConfigured() {
             register(::validateTemplate)
             register(::validateBoundaryPaths)
             register(::validateInstantiations)
         }
 
 
-        private fun validateTemplate(path: UppaalPath, template: Template): List<UppaalMessage> {
+        private fun validateTemplate(path: UppaalPath, template: Template) {
             val errors = ArrayList<UppaalMessage>()
-            val info = index[template] ?: return emptyList()
+            val info = index[template] ?: return
 
             val referencedBndPointIDsToDirs = HashMap<String, String>()
 
@@ -197,55 +198,47 @@ class AioCompMapper : Mapper() {
                 }
 
             info.hasPassedReferenceCheck = errors.isEmpty()
-            return errors
+            reportAll(errors)
         }
 
-        private fun validateBoundaryPaths(unused1: UppaalPath, unused2: System): List<UppaalMessage> {
-            val errors = ArrayList<UppaalMessage>()
-
+        private fun validateBoundaryPaths(unused1: UppaalPath, unused2: System) {
             // No cyclic referencing of sub-templates
             val referenceCycles = index.getCircularReferences()
             for (refCycle in referenceCycles)
-                errors.add(cyclicReferencesError(refCycle.value, refCycle.key))
+                report(cyclicReferencesError(refCycle.value, refCycle.key))
 
             // No circular or incomplete boundary paths
             for (bndPath in index.getBoundaryPaths()) {
                 when (bndPath.type) {
-                    PathType.INCOMPLETE -> errors.add(incompleteBoundaryPathError(bndPath.path))
-                    PathType.CYCLIC -> errors.add(cyclicBoundaryPathError(bndPath.path))
+                    PathType.INCOMPLETE -> report(incompleteBoundaryPathError(bndPath.path))
+                    PathType.CYCLIC -> report(cyclicBoundaryPathError(bndPath.path))
                     PathType.COMPLETE -> {
                         val syncEdges = bndPath.path.filter { it.edge.getLabel(Label.KIND_SYNC) != null }
                         if (syncEdges.size > 1)
-                            errors.add(multipleSyncOnBoundaryPathError(bndPath.path, syncEdges))
+                            report(multipleSyncOnBoundaryPathError(bndPath.path, syncEdges))
                     }
                 }
                 if (bndPath.type != PathType.COMPLETE)
                     bndPath.path.forEach { it.templateInfo.hasPassedCycleCheck = false }
             }
-
-            return errors
         }
 
         /** Ensure user-code does not instantiate sub-templates **/
-        private fun validateInstantiations(path: UppaalPath, system: System): List<UppaalMessage> {
-            val errors = ArrayList<UppaalMessage>()
-
+        private fun validateInstantiations(path: UppaalPath, system: System) {
             for (partialInst in partialInstConfre.findAll(system.content)) {
                 if (partialInst[3]!!.toString() in index.subTemplates)
-                    errors.add(userCodeInstantiatesSubTemplateError(path, system.content, partialInst[3]!!.tree))
+                    report(userCodeInstantiatesSubTemplateError(path, system.content, partialInst[3]!!.tree))
 
                 if (AioCompModelIndex.isSubTemplate(partialInst[0]!!.toString()))
-                    errors.add(partialInstantiationIsSubTemplateError(path, system.content, partialInst[0]!!.tree))
+                    report(partialInstantiationIsSubTemplateError(path, system.content, partialInst[0]!!.tree))
             }
 
             for (fullInst in systemLineConfre.findAll(system.content)) {
                 val identNodes = fullInst[2]!!.children.map { it!![1]!![0] } + fullInst[1]!![0]
                 for (identNode in identNodes.filterNotNull())
                     if (AioCompModelIndex.trueName(identNode.toString()) in index.subTemplates)
-                        errors.add(userCodeInstantiatesSubTemplateError(path, system.content, identNode.tree))
+                        report(userCodeInstantiatesSubTemplateError(path, system.content, identNode.tree))
             }
-
-            return errors
         }
 
 
@@ -299,18 +292,18 @@ class AioCompMapper : Mapper() {
 
 
     inner class InfixMapping(val index: AioCompModelIndex) : ModelPhase() {
-        private val partialInstConfre = parserBuilder.generateParser("PartialInst")
-        private val systemLineConfre = parserBuilder.generateParser("SystemLine")
+        private val partialInstConfre by lazy { generateParser("PartialInst") }
+        private val systemLineConfre by lazy { generateParser("SystemLine") }
         private val trueToInfixedNames = HashMap<String, String>()
 
 
-        init {
+        override fun onConfigured() {
             register(::mapNta)
             register(::mapSystemLine)
         }
 
 
-        private fun mapNta(path: UppaalPath, nta: Nta): List<UppaalMessage> {
+        private fun mapNta(path: UppaalPath, nta: Nta) {
             for (rootInfo in index.rootSubTemUsers.values)
                 if (rootInfo.canBeMapped){
                     val newTemplate = SubTemplateInfixer.infix(rootInfo, index)
@@ -320,12 +313,10 @@ class AioCompMapper : Mapper() {
 
             // TODO: What to do about sub-templates(-users)? Remove them (must map errors from infix to original) or keep them (must remove non-native concepts in a guaranteed, non-disruptive manner)
             nta.templates.removeAll(index.taTemplates.values.filter { it.subTemOrUser }.map { it.element }) // Remove all for now
-
-            return emptyList()
         }
 
         /** Replaces top-level sub-template user-names with "infix names" and make back-map to original system configuration **/
-        private fun mapSystemLine(path: UppaalPath, system: System): List<UppaalMessage> {
+        private fun mapSystemLine(path: UppaalPath, system: System) {
             // TODO: Data-structure to make system-back-map (AioCompSystemIndex?)
 
             val rewriter = getRewriter(path, system.content)
@@ -347,7 +338,6 @@ class AioCompMapper : Mapper() {
             }
 
             system.content = rewriter.getRewrittenText()
-            return emptyList()
         }
     }
 }

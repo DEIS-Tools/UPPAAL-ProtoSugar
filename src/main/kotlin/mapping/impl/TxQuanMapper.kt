@@ -1,7 +1,7 @@
 package mapping.impl
 
 import mapping.base.Mapper
-import mapping.base.PhaseOutput
+import mapping.base.Phases
 import mapping.base.QueryPhase
 import tools.parsing.Confre
 import tools.parsing.ConfreHelper
@@ -10,7 +10,7 @@ import tools.parsing.ParseTree
 import tools.restructuring.TextRewriter
 
 class TxQuanMapper : Mapper() {
-    override fun getPhases() = PhaseOutput(listOf(), null, TxQuanQueryPhase())
+    override fun buildPhases() = Phases(listOf(), null, TxQuanQueryPhase())
 
     private class TxQuanQueryPhase : QueryPhase()
     {

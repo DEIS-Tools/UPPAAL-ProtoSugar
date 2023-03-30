@@ -41,7 +41,7 @@ class SeCompMapper : Mapper() {
     )
 
 
-    override fun getPhases(): PhaseOutput {
+    override fun buildPhases(): Phases {
         val freeTypedefs = HashMap<String, Pair<Int, Int>?>() // 'not null' = int range, 'null' = scalar range
         val constInts = HashMap<String, Int>()                // Maps typedefs to scalar or int ranges
 
@@ -54,7 +54,7 @@ class SeCompMapper : Mapper() {
 
         val subTemplateQueryMapInfo = HashMap<String, SubTemplateQueryMapInfo>()
 
-        return PhaseOutput(
+        return Phases(
             listOf(
                 IndexingPhase(freeTypedefs, constInts, subTemplates, baseSubTemplateUsers, numSubTemplateUsers, systemLine),
                 ReferenceCheckingPhase(subTemplates, baseSubTemplateUsers),
@@ -93,7 +93,7 @@ class SeCompMapper : Mapper() {
 
 
         init {
-            register(::indexGlobalDeclaration, listOf(Nta::class.java))
+            register(::indexGlobalDeclaration, listOf(Nta::class))
             register(::indexTemplate)
             register(::indexSystem)
         }
@@ -457,7 +457,7 @@ class SeCompMapper : Mapper() {
 
 
         init {
-            register(::mapGlobalDeclaration, prefix = listOf(Nta::class.java))
+            register(::mapGlobalDeclaration, listOf(Nta::class))
             register(::mapTemplate)
             register(::mapSystem)
         }
