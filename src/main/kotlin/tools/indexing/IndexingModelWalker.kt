@@ -9,6 +9,7 @@ import tools.indexing.text.types.IntType
 import tools.indexing.text.types.Type
 import tools.indexing.tree.Model
 import tools.indexing.tree.TemplateDecl
+import tools.indexing.tree.TransitionDecl
 import tools.parsing.GuardedParseTree
 import tools.parsing.SyntaxRegistry
 import uppaal.UppaalPath
@@ -33,13 +34,13 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
         when (uppaalPojo) {
             is Nta -> currentScope = Model(uppaalPojo)
             is Template -> currentScope = TemplateDecl(uppaalPojo.name.content, currentScope, uppaalPojo)
-            //is Transition -> currentScope = TransitionDecl(uppaalPojo.name.content, currentScope, uppaalPojo)
+            is Transition -> currentScope = TransitionDecl(currentScope, uppaalPojo)
         }
     }
 
     override fun stepOut(path: UppaalPath, uppaalPojo: UppaalPojo) {
         when (uppaalPojo) {
-            is Nta, is Template ->
+            is Nta, is Template, is Transition ->
                 currentScope = currentScope.parentOrSelf()
         }
     }
@@ -50,6 +51,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
             is Declaration -> declarationNode(uppaalPojo)
             is System -> systemNode(uppaalPojo)
         }
+        // TODO: Transitions, locations, labels, ... names(?), etc.
     }
 
     private fun parameterNode(parameter: Parameter) {

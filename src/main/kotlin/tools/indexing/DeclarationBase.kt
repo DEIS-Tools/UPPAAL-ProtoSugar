@@ -2,7 +2,7 @@ package tools.indexing
 
 import tools.indexing.text.FieldDecl
 
-abstract class DeclarationBase(val identifier: String, parent: DeclarationHolder) : DeclarationHolder() {
+abstract class DeclarationBase(open val identifier: String?, parent: DeclarationHolder) : DeclarationHolder() {
     var parent: DeclarationHolder = parent
         private set
 

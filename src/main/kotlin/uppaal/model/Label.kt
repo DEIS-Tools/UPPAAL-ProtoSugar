@@ -11,6 +11,8 @@ class Label() : TextUppaalPojo {
         const val KIND_GUARD = "guard"
         const val KIND_SYNC = "synchronisation"
         const val KIND_UPDATE = "assignment"
+        const val KIND_COMMENT = "comment"
+        const val KIND_INVARIANT = "invariant"
     }
 
     @field:Attribute(name = "kind")

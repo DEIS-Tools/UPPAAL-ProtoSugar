@@ -1,6 +1,7 @@
 package mapping.impl.aiocomp
 
 import tools.indexing.tree.Model
+import tools.parsing.GuardedConfre
 import uppaal.UppaalPath
 import uppaal.model.BoundaryPoint
 import uppaal.model.SubTemplateReference
@@ -105,6 +106,7 @@ class AioCompModelIndex {
     }
 
     lateinit var model: Model
+    lateinit var exprConfre: GuardedConfre
 
     val taTemplates = LinkedHashMap<String, TaTemplateInfo>()
     val subTemplates = LinkedHashMap<String, TaTemplateInfo>()

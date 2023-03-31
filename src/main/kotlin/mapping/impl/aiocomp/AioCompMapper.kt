@@ -24,6 +24,7 @@ class AioCompMapper : Mapper() {
     inner class ModelIndexing(val index: AioCompModelIndex) : ModelPhase() {
         override fun onConfigured() {
             index.model = model
+            index.exprConfre = generateParser("Expression")
             register(::indexTemplate)
         }
 

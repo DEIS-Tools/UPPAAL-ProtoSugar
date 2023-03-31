@@ -1,7 +1,6 @@
 package mapping.impl.aiocomp
 
-import tools.indexing.text.FieldDecl
-import tools.indexing.text.ParameterDecl
+import tools.indexing.text.*
 import tools.indexing.tree.TemplateDecl
 import tools.restructuring.TextRewriter
 import uppaal.model.*
@@ -60,11 +59,40 @@ class SubTemplateInfixer {
             val declRewriter = TextRewriter(currentInfo.element.declaration?.content ?: "")
             val namesToRewrite = HashSet<String>()
 
+            // TODO: In order for scalar typedefs to remain "the same" between all instances of a sub-template, move the typedefs (w/ scalars) to the scope just above (global without nesting) with some unique name.
+            // TODO: Use use scopes and resolve logic to "protect" IDENT occurrences, i.e., IDENTs from AutoArr which are actually declarations, but are still just IDENTs in an expression
             for (decl in currentScope.subDeclarations.filterIsInstance<FieldDecl>().filter { it !is ParameterDecl }) {
                 namesToRewrite.add(decl.identifier)
-                //declRewriter.replace(decl.parseTree.findTerminal("IDENT")!!.fullRange, qualify(decl.identifier, declPrefix))
-                // TODO: replace namesToRewrite in "decl expression" if VariableDecl
+                when (decl) {
+                    is FunctionDecl -> throw Exception("Not supported yet")
+                    is VariableDecl, is TypedefDecl -> {
+                        declRewriter.replace(decl.parseTree.findAllTerminals("IDENT").first().fullRange, qualify(decl.identifier, declPrefix))
+                        if (decl is VariableDecl)
+                            decl.parseTree[2]!!.findAllTerminals("IDENT", onlyLocal = false, onlyVisible = false).filter { it.leaf.token!!.value in namesToRewrite }.forEach {
+                                declRewriter.replace(it.fullRange, qualify(it.leaf.token!!.value, declPrefix))
+                            }
+                    }
+                }
             }
+            for (label in result.locations.asSequence().flatMap { it.labels } + result.transitions.asSequence().flatMap { it.labels }) // TODO: Rewrite arguments given in sub-template-reference
+            {
+                // TODO: Transition scopes to protect against wrongful rewrite (goes for select label decls and PaCha (meta) decls)
+                val labelRewriter = TextRewriter(label.content)
+                val confre = when (label.kind) {
+                    Label.KIND_GUARD, Label.KIND_UPDATE, Label.KIND_INVARIANT -> index.exprConfre
+                    else -> continue // TODO: Support for select.
+                                     // TODO: Support for extensibility so that PaCha can find uses in sync-label
+                }
+
+                for (tree in confre.findAll(label.content)) {
+                    tree.findAllTerminals("IDENT", onlyLocal = false, onlyVisible = false).filter { it.leaf.token!!.value in namesToRewrite }.forEach {
+                        labelRewriter.replace(it.fullRange, qualify(it.leaf.token!!.value, declPrefix))
+                    }
+                }
+
+                label.content = labelRewriter.getRewrittenText()
+            }
+
             result.declaration = Declaration(declRewriter.getRewrittenText())
 
             // TODO: Rewrite usages outside "declaration node" (edges, etc.)

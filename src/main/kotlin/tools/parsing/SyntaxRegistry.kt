@@ -47,13 +47,15 @@ class SyntaxRegistry {
         AddNonTerminal("Param",         "Type ['&'] IDENT Subscripts"),
         AddNonTerminal("ArgList",       "[Expression] {',' [Expression]} ."),
 
-        AddNonTerminal("Expression",    "[Unary] ('(' Expression ')' | ExtendedTerm {'.' [ExtendedTerm]} | Quantifier) [(Binary|Assignment) Expression] ."),
+        AddNonTerminal("Expression",    "[Unary | Increment] ('(' Expression ')' | ExtendedTerm {'.' [ExtendedTerm]} | Quantifier) [Increment] [(Binary|Assignment) Expression | Ternary] ."),
         AddNonTerminal("ExtendedTerm",  "Term [Subscripts | '(' ArgList ')'] ."),
         AddNonTerminal("Term",          "IDENT | NUMBER | BOOL | 'deadlock' ."),
         AddNonTerminal("Quantifier",    "('forall' | 'exists' | 'sum') '(' IDENT ':' Type ')' Expression ."),
         AddNonTerminal("Unary",         "'+' | '-' | '!' | 'not' ."),
+        AddNonTerminal("Increment",     "'++' | '--' ."),
         AddNonTerminal("Binary",        "'<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' ."),
         AddNonTerminal("Assignment",    "'=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' ."),
+        AddNonTerminal("Ternary",       "'?' Expression ':' Expression ."),
 
         AddNonTerminal("Type",          "['const'|'meta'] (NonStruct | Struct) ."), // TODO  "|'&'" and "[Subscripts]" <- CompactType
         AddNonTerminal("NonStruct",     "IDENT ['[' [Expression] [',' [Expression]] ']'] ."), // TODO   "| '(' [CompactType] {',' [CompactType]} ')'"
@@ -368,9 +370,9 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         return findNonTerminal(nonTerminalName)
     }
 
-    fun findTerminal(terminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): GuardedParseTree? {
+    fun findAllTerminals(terminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): Sequence<GuardedParseTree> {
         assert(Confre.identifierPattern.matches(terminalName)) { "'$terminalName' is not a valid terminal name" }
-        return findTerminal(terminalName)
+        return findTerminals(terminalName, onlyLocal, onlyVisible)
     }
 
 
@@ -470,21 +472,17 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         return null
     }
 
-    /** Local search for terminal **/ // TODO: Implement global search, non-visible search, and behind-unsafe-search
-    private fun findTerminal(terminalName: String): GuardedParseTree? {
-        for (internalChild in visibleIndices.mapNotNull { node.children[it] }) {
-            if (internalChild.grammar is NonTerminalRef)
-                continue
+    /** Local search for terminal **/ // TODO: Implement behind-unsafe-search or make check on guardedParseTree to see if on safe branch?
+    private fun findTerminals(terminalName: String, onlyLocal: Boolean, onlyVisible: Boolean): Sequence<GuardedParseTree> = sequence {
+        val chosenIndices = if (onlyVisible) visibleIndices else parseTree.asNode().children.indices
+        for (internalChild in chosenIndices.mapNotNull { node.children[it] }) {
             if (internalChild.grammar is TerminalRef) {
                 if ((internalChild.grammar as TerminalRef).terminalName == terminalName)
-                    return getGuarded(internalChild)
-            } else {
-                return getUnsafe(internalChild).findTerminal(terminalName)
-                    ?: continue
+                    yield(getGuarded(internalChild))
+            } else if (!onlyLocal || internalChild.grammar !is NonTerminalRef) {
+                yieldAll(getUnsafe(internalChild).findTerminals(terminalName, onlyLocal, onlyVisible))
             }
         }
-
-        return null
     }
 
     private fun predictLocalSafety(parseTree: ParseTree?): Safety {
@@ -521,10 +519,8 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         else
             throw Exception("The index '$index' was not within the range of visible indices '${visibleIndices.indices}'")
     }
-
     private fun getGuarded(parseTree: ParseTree): GuardedParseTree
-        = guardedChildren.getOrPut(parseTree) { GuardedParseTree(parseTree, localSafetyPredictionCache) }
-
+            = guardedChildren.getOrPut(parseTree) { GuardedParseTree(parseTree, localSafetyPredictionCache) }
     private fun getUnsafe(parseTree: ParseTree): GuardedParseTree
             = GuardedParseTree(parseTree, localSafetyPredictionCache)
 

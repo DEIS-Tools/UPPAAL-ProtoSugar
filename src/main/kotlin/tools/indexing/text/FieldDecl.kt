@@ -6,7 +6,7 @@ import tools.parsing.GuardedParseTree
 import uppaal.model.TextUppaalPojo
 
 abstract class FieldDecl(
-    identifier: String, parent: DeclarationHolder,
+    override val identifier: String, parent: DeclarationHolder,
     override val parseTree: GuardedParseTree,
     override val source: TextUppaalPojo
 ) : DeclarationBase(identifier, parent), Textual

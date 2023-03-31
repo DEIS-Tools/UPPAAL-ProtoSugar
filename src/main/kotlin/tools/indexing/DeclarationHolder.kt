@@ -1,7 +1,6 @@
 package tools.indexing
 
 import tools.indexing.text.FieldDecl
-import kotlin.reflect.KClass
 
 abstract class DeclarationHolder {
     private val _subDeclarations = linkedSetOf<DeclarationBase>() // Order of elements affects visibility
@@ -54,12 +53,17 @@ abstract class DeclarationHolder {
     }
 
 
-
-    inline fun <reified T : DeclarationHolder> findAllLocal(noinline predicate: ((T) -> Boolean)? = null): Sequence<T> {
+    inline fun <reified T : DeclarationHolder> findAll(noinline predicate: ((T) -> Boolean)?): Sequence<T> {
         val sequence = subDeclarations.asSequence().filterIsInstance<T>()
         return if (predicate == null) sequence
         else sequence.filter(predicate)
     }
+
+    //fun <T : DeclarationHolder> findAll(predicate: ((T) -> Boolean)?, targetClass: Class<T>): Sequence<T> {
+    //    val sequence = subDeclarations.asSequence().filterIsInstance(targetClass)
+    //    return if (predicate == null) sequence
+    //    else sequence.filter(predicate)
+    //}
 }
 
 fun DeclarationHolder.parentOrSelf(): DeclarationHolder

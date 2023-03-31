@@ -31,11 +31,18 @@ abstract class ModelWalkerBase
         visitSingle(path, template.name)
         visitNullableSingle(path, template.parameter)
         visitNullableSingle(path, template.declaration)
-        visitAll(path, template.locations)
+        visitAll(path, template.locations, this::visitLocation)
         visitAll(path, template.branchpoints)
         visitAll(path, template.boundarypoints)
         visitAll(path, template.subtemplatereferences, this::visitSubTemplateReference)
         visitAll(path, template.transitions, this::visitTransition)
+    }
+
+    private fun visitLocation(path: UppaalPath, location: Location) {
+        visitUppaalPojo(path, location)
+
+        visitNullableSingle(path, location.name)
+        visitAll(path, location.labels)
     }
 
     private fun visitTransition(path: UppaalPath, transition: Transition) {
