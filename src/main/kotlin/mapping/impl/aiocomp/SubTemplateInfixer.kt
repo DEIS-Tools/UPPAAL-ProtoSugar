@@ -1,8 +1,10 @@
 package mapping.impl.aiocomp
 
-import uppaal.model.SubTemplateReference
-import uppaal.model.Template
-import uppaal.model.Transition
+import tools.indexing.text.FieldDecl
+import tools.indexing.text.ParameterDecl
+import tools.indexing.tree.TemplateDecl
+import tools.restructuring.TextRewriter
+import uppaal.model.*
 
 class SubTemplateInfixer {
     companion object {
@@ -14,7 +16,6 @@ class SubTemplateInfixer {
             result.name.content = "_infixed_${info.trueName}"
             result.init = info.element.init?.clone()
             result.parameter = info.element.parameter?.clone()
-            result.declaration = info.element.declaration?.clone() // TODO: Remove since "flatten" or "merge" should do this, but better
             result.subtemplatereferences.clear()
             result.boundarypoints.clear()
 
@@ -34,15 +35,12 @@ class SubTemplateInfixer {
                 )
             }
             val result = currentInfo.element.clone()
-            result.name.content = "_temp_" + result.name.content
 
-            // TODO: Later -> map declaration and parameter names and usages thereof
-            for (location in result.locations)
-                location.name?.let { it.content = qualify(it.content, declPrefix) } // TODO: Is there a need to map location-name-usages???
+            renameDeclsAndParams(index, currentInfo, result, declPrefix)
 
             for ((flatSub, boundaryInfo) in flatSubs) {
                 val instanceName = boundaryInfo.getOrNull(0)?.subTemplateReference?.name?.content ?: ""
-                merge(result, flatSub, boundaryInfo, listOf(instanceName))
+                merge(result, flatSub, boundaryInfo, declPrefix)
             }
 
             // TODO: Later -> store back-mapping information in AioCompModelIndex
@@ -50,11 +48,38 @@ class SubTemplateInfixer {
         }
 
         @JvmStatic
+        private fun renameDeclsAndParams(
+            index: AioCompModelIndex,
+            currentInfo: TaTemplateInfo,
+            result: Template,
+            declPrefix: List<String>
+        ) {
+            // TODO: Later -> map parameter names and usages
+
+            val currentScope = index.model.find<TemplateDecl> { it.element == currentInfo.element } ?: throw Exception("Should have scope, but no?") // TODO: Proper message
+            val declRewriter = TextRewriter(currentInfo.element.declaration?.content ?: "")
+            val namesToRewrite = HashSet<String>()
+
+            for (decl in currentScope.subDeclarations.filterIsInstance<FieldDecl>().filter { it !is ParameterDecl }) {
+                namesToRewrite.add(decl.identifier)
+                //declRewriter.replace(decl.parseTree.findTerminal("IDENT")!!.fullRange, qualify(decl.identifier, declPrefix))
+                // TODO: replace namesToRewrite in "decl expression" if VariableDecl
+            }
+            result.declaration = Declaration(declRewriter.getRewrittenText())
+
+            // TODO: Rewrite usages outside "declaration node" (edges, etc.)
+            //  HOWEVER! If the scope shadows the name, such as in an edge with a select statement, do NOT overwrite the name
+
+            for (location in result.locations) // TODO: Is there a need to map location-name-usages???
+                location.name?.let { it.content = qualify(it.content, declPrefix) }
+        }
+
+        @JvmStatic
         private fun merge(parent: Template, flatSub: Template, boundaryInfo: List<LinkedBoundary>, declPrefix: List<String>) {
             // TODO: Later -> Adjust coordinates of locations, transitions, etc
-
             // TODO: Later -> map/move/merge parameters/arguments
-            // TODO: Later -> move declarations
+
+            parent.declaration!!.content += "\n\n// '${qualify(flatSub.name.content, declPrefix, ".")}' (${AioCompModelIndex.trueName(flatSub.name.content)}) below\n" + flatSub.declaration!!.content
 
             // Merge edges between boundary points
             for (path in getPartialBoundaryPaths(parent, flatSub, boundaryInfo)) {
@@ -66,9 +91,9 @@ class SubTemplateInfixer {
 
                 for (partial in path.getAllCombinations()) {
                     val newTransition = Transition()
-                    determineIdOfSourceAndTarget(partial, newTransition, declPrefix)
 
-                    // TODO: Merge labels (requires scope knowledge)
+                    determineIdOfSourceAndTarget(partial, newTransition, declPrefix)
+                    mergeLabels(partial, newTransition)
 
                     parent.transitions.add(newTransition)
                 }
@@ -87,6 +112,7 @@ class SubTemplateInfixer {
             }
         }
 
+        @JvmStatic
         private fun determineIdOfSourceAndTarget(
             partial: Partial,
             newTransition: Transition,
@@ -108,6 +134,46 @@ class SubTemplateInfixer {
                 newTransition.source.ref = qualify(newTransition.source.ref, declPrefix, ".") // Only qualify inside sub-template
             }
         }
+
+        @JvmStatic
+        private fun mergeLabels(partial: Partial, newTransition: Transition) {
+            val selectLabels = extractLabels(partial, Label.KIND_SELECT)
+            if (selectLabels.isNotEmpty()) {
+                // TODO: Automatically fix name-clashes
+
+                newTransition.labels.add(
+                    Label(Label.KIND_UPDATE, 0, 0, selectLabels.joinToString("\n") { it.content })
+                )
+            }
+
+            val guardLabels = extractLabels(partial, Label.KIND_GUARD)
+            if (guardLabels.isNotEmpty()){
+                newTransition.labels.add(
+                    Label(Label.KIND_GUARD, 0, 0, guardLabels.joinToString(" && ") { "(${it.content})" })
+                )
+            }
+
+            extractLabels(partial, Label.KIND_SYNC).singleOrNull()?.let {
+                newTransition.labels.add(it.clone())
+            }
+
+            val updateLabels = extractLabels(partial, Label.KIND_UPDATE)
+            if (updateLabels.isNotEmpty()) {
+                newTransition.labels.add(
+                    Label(Label.KIND_UPDATE, 0, 0, updateLabels.joinToString(", ") { it.content })
+                )
+            }
+        }
+
+        @JvmStatic
+        private fun extractLabels(partial: Partial, labelKind: String): List<Label> {
+            return listOfNotNull(
+                partial.entering?.labels?.find { it.kind == labelKind },
+                partial.inside.labels.find { it.kind == labelKind },
+                partial.exiting?.labels?.find { it.kind == labelKind }
+            ).filter { it.content.isNotBlank() }
+        }
+
 
         @JvmStatic
         private fun qualify(baseName: String, prefixes: List<String>, sep: String = STD_SEP) =

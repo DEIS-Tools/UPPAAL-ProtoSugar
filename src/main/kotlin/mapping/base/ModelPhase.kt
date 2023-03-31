@@ -8,12 +8,12 @@ import uppaal.messaging.UppaalMessage
 import uppaal.UppaalPath
 import uppaal.model.Nta
 import uppaal.model.UppaalPojo
-import uppaal.walkers.MappingModelWalker
+import uppaal.walkers.ModularModelWalker
 import kotlin.reflect.KClass
 
 abstract class ModelPhase : PhaseBase()
 {
-    private val walker = MappingModelWalker()
+    private val walker = ModularModelWalker()
     private val messages = ArrayList<UppaalMessage>()
     private val rewriters = HashMap<String, TextRewriter>()
 

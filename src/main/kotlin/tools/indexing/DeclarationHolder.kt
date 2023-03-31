@@ -1,6 +1,7 @@
 package tools.indexing
 
 import tools.indexing.text.FieldDecl
+import kotlin.reflect.KClass
 
 abstract class DeclarationHolder {
     private val _subDeclarations = linkedSetOf<DeclarationBase>() // Order of elements affects visibility
@@ -38,9 +39,20 @@ abstract class DeclarationHolder {
 
 
     /** Find an identifier based on "something (TODO: dot notation? Figure out as we go)" **/
-    fun <T> find(/* Something */): DeclarationBase? {
+    fun <T> find(/* Something */): T? {
         return null
     }
+
+
+    // TODO: May require different-search strategies (depth first? breadth first? Something else? This might not even make sense to allow in the first place)
+    inline fun <reified T : DeclarationHolder> find(noinline predicate: (T) -> Boolean): T?
+        = find(predicate, T::class.java)
+
+    fun <T : DeclarationHolder> find(predicate: (T) -> Boolean, targetClass: Class<T>): T? {
+        return subDeclarations.asSequence().filterIsInstance(targetClass).find(predicate)
+            ?: subDeclarations.firstNotNullOfOrNull { it.find(predicate, targetClass) }
+    }
+
 
 
     inline fun <reified T : DeclarationHolder> findAllLocal(noinline predicate: ((T) -> Boolean)? = null): Sequence<T> {

@@ -339,8 +339,7 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
 
     val indices get() = visibleIndices.indices
     val size get() = visibleIndices.size
-    val visibleRange get() // TODO: Does not account for hidden branches below 1st layer
-            = IntRange(
+    val visibleRange get() = IntRange( // TODO: Does not account for hidden branches below 1st layer
         visibleIndices.map { getVisibleChild(it) }.first { it?.isNotBlank() ?: false }!!.startPosition(),
         visibleIndices.map { getVisibleChild(it) }.first { it?.isNotBlank() ?: false }!!.endPosition()
     )
@@ -363,12 +362,15 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         }
     }
     fun getUnguarded(visibleIndex: Int): ParseTree? = getVisibleChild(visibleIndex)
-    fun findLocal(nonTerminalName: String): GuardedParseTree? {
+
+    fun findNonTerminal(nonTerminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): GuardedParseTree? {
         assert(getNonTerminalSafety(nonTerminalName) == Safety.SAFE) { "Cannot search for an unsafe non-terminal" }
         return findNonTerminal(nonTerminalName)
     }
-    fun findGlobal(nonTerminalName: String): GuardedParseTree? {
-        TODO("Just todo")
+
+    fun findTerminal(terminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): GuardedParseTree? {
+        assert(Confre.identifierPattern.matches(terminalName)) { "'$terminalName' is not a valid terminal name" }
+        return findTerminal(terminalName)
     }
 
 
@@ -453,13 +455,14 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         }
     }
 
+    /** Local search for non-terminal **/ // TODO: Implement global search, non-visible search, and behind-unsafe-search
     private fun findNonTerminal(nonTerminalName: String): GuardedParseTree? {
         for (internalChild in visibleIndices.map { node.children[it] }.filterIsInstance<Node>()) {
             if (internalChild.grammar is NonTerminalRef) {
                 if (internalChild.grammar.nonTerminalName == nonTerminalName)
                     return getGuarded(internalChild)
             } else {
-                return getGuarded(internalChild).findLocal(nonTerminalName)
+                return getUnsafe(internalChild).findNonTerminal(nonTerminalName)
                     ?: continue
             }
         }
@@ -467,13 +470,16 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         return null
     }
 
+    /** Local search for terminal **/ // TODO: Implement global search, non-visible search, and behind-unsafe-search
     private fun findTerminal(terminalName: String): GuardedParseTree? {
-        for (internalChild in visibleIndices.map { node.children[it] }.filterIsInstance<Node>()) {
+        for (internalChild in visibleIndices.mapNotNull { node.children[it] }) {
+            if (internalChild.grammar is NonTerminalRef)
+                continue
             if (internalChild.grammar is TerminalRef) {
-                if (internalChild.grammar.terminalName == terminalName)
+                if ((internalChild.grammar as TerminalRef).terminalName == terminalName)
                     return getGuarded(internalChild)
             } else {
-                return getGuarded(internalChild).findLocal(terminalName)
+                return getUnsafe(internalChild).findTerminal(terminalName)
                     ?: continue
             }
         }
@@ -518,6 +524,9 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
 
     private fun getGuarded(parseTree: ParseTree): GuardedParseTree
         = guardedChildren.getOrPut(parseTree) { GuardedParseTree(parseTree, localSafetyPredictionCache) }
+
+    private fun getUnsafe(parseTree: ParseTree): GuardedParseTree
+            = GuardedParseTree(parseTree, localSafetyPredictionCache)
 
     private fun getNonTerminalSafety(guardedParseTree: GuardedParseTree): Safety
             = getNonTerminalSafety((guardedParseTree.parseTree.grammar as NonTerminalRef).nonTerminalName)

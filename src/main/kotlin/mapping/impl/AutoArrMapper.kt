@@ -1,7 +1,6 @@
 package mapping.impl
 
 import mapping.base.*
-import tools.indexing.DeclarationBase
 import tools.indexing.DeclarationHolder
 import tools.restructuring.ActivationRule
 import tools.restructuring.TextRewriter
@@ -68,7 +67,7 @@ class AutoArrMapper : Mapper() {
 
         private fun doMapping(rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationHolder) {
             for (decl in declarationConfre.findAll(rewriter.originalText)) {
-                val varNode = decl.findLocal("VarOrFunction") ?: continue
+                val varNode = decl.findNonTerminal("VarOrFunction") ?: continue
                 if (varNode.localFullySafe)
                     if (!tryRegisterConstInt(varNode, path.last().element as TextUppaalPojo, rewriter, scopeDecl))
                         tryParseAutoArray(varNode, rewriter, path, scopeDecl)
@@ -77,7 +76,7 @@ class AutoArrMapper : Mapper() {
 
         private fun tryRegisterConstInt(varNode: GuardedParseTree, source: TextUppaalPojo, rewriter: TextRewriter, scopeDecl: DeclarationHolder): Boolean {
             // Check if "non-array instantiation" // TODO: Parse all declarations (using "Declaration parser (mapper)????")
-            val exprNode = varNode[2]!!.findLocal("Expression") ?: return false
+            val exprNode = varNode[2]!!.findNonTerminal("Expression") ?: return false
             if (!varNode[2]!![0]!!.isBlank) // Ensure no subscript/array-notation
                 return false
 
@@ -85,7 +84,7 @@ class AutoArrMapper : Mapper() {
             val typeNode = varNode[0]!!
             if (!typeNode.globalFullySafe || typeNode.getUnguarded(0).toString() != "const")
                 return false
-            val nonStructNode = typeNode.findLocal("NonStruct") ?: return false
+            val nonStructNode = typeNode.findNonTerminal("NonStruct") ?: return false
             if (nonStructNode[0]!!.toString() != "int")
                 return false
 
@@ -99,14 +98,14 @@ class AutoArrMapper : Mapper() {
 
         private fun tryParseAutoArray(varNode: GuardedParseTree, rewriter: TextRewriter, path: UppaalPath, scopeDecl: DeclarationHolder) {
             // Check if "array with auto-syntax"
-            val arrayInitNode = varNode[2]!!.findLocal("ArrayInit") ?: return
-            val autoArrNode = arrayInitNode[3]!!.findLocal("AutoArr") ?: return
+            val arrayInitNode = varNode[2]!!.findNonTerminal("ArrayInit") ?: return
+            val autoArrNode = arrayInitNode[3]!!.findNonTerminal("AutoArr") ?: return
             val subscriptNode = varNode[2]!![0]!!
             if (subscriptNode.isBlank || !subscriptNode.localFullySafe || !arrayInitNode.localFullySafe)
                 return
 
             // Check if "int or bool type array"
-            val nonStructNode = varNode[0]!!.findLocal("NonStruct") ?: return
+            val nonStructNode = varNode[0]!!.findNonTerminal("NonStruct") ?: return
             if (!nonStructNode.localFullySafe || nonStructNode[0]!!.toString() !in arrayOf("int", "bool"))
                 return
 
@@ -141,7 +140,7 @@ class AutoArrMapper : Mapper() {
 
 
         private fun getDimensionSizes(subscriptNode: GuardedParseTree, scopeDecl: DeclarationHolder): List<Int?> {
-            val sizeExprNodes = subscriptNode[0]!!.children.map { it?.findLocal("Expression") }
+            val sizeExprNodes = subscriptNode[0]!!.children.map { it?.findNonTerminal("Expression") }
             return sizeExprNodes.map {
                 val expr = it?.toStringNotNull() // TODO: Use "expression evaluator" instead
                 if (expr == null)

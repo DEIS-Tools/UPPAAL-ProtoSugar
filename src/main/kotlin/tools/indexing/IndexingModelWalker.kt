@@ -33,6 +33,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
         when (uppaalPojo) {
             is Nta -> currentScope = Model(uppaalPojo)
             is Template -> currentScope = TemplateDecl(uppaalPojo.name.content, currentScope, uppaalPojo)
+            //is Transition -> currentScope = TransitionDecl(uppaalPojo.name.content, currentScope, uppaalPojo)
         }
     }
 
@@ -68,7 +69,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
     }
 
     private fun registerDeclaration(parseTree: GuardedParseTree, sourcePojo: TextUppaalPojo) {
-        val varOrFunc = parseTree.findLocal("VarOrFunction")
+        val varOrFunc = parseTree.findNonTerminal("VarOrFunction")
         if (varOrFunc != null) {
             return if (varOrFunc[2]!![0]!!.isLeaf && varOrFunc[2]!![0]!!.leaf.token?.value == "(")
                 parseFunction(varOrFunc, sourcePojo)
@@ -76,7 +77,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
                 parseVariable(varOrFunc, sourcePojo)
         }
 
-        val typedef = parseTree.findLocal("Typedef")
+        val typedef = parseTree.findNonTerminal("Typedef")
         if (typedef != null)
             return parseTypedef(typedef, sourcePojo)
 

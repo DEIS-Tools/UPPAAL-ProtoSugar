@@ -89,7 +89,7 @@ class TaTemplateInfo(
 }
 
 
-class AioCompModelIndex() {
+class AioCompModelIndex {
     companion object {
         @JvmStatic
         fun isSubTemplate(template: Template): Boolean
