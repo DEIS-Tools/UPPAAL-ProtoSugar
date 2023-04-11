@@ -1,4 +1,4 @@
-package tools.indexing.text
+package tools.indexing
 
 import tools.parsing.GuardedParseTree
 import uppaal.model.TextUppaalPojo

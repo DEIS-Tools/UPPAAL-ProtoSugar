@@ -2,6 +2,7 @@ package mapping.impl.aiocomp
 
 import tools.indexing.tree.Model
 import tools.parsing.GuardedConfre
+import tools.parsing.GuardedParseTree
 import uppaal.UppaalPath
 import uppaal.model.BoundaryPoint
 import uppaal.model.SubTemplateReference
@@ -66,6 +67,11 @@ class LocalBoundaryInfo(val entries: List<BoundaryPoint>, val exits: List<Bounda
     }
 }
 
+class SubTemplateUsage {
+    var arguments: List<GuardedParseTree> = emptyList()
+    var referencedInfo: TaTemplateInfo? = null
+}
+
 class TaTemplateInfo(
     val element: Template,
     val path: UppaalPath,
@@ -75,7 +81,7 @@ class TaTemplateInfo(
     val boundaryInfo = LocalBoundaryInfo.from(element)
     val linkedBoundaryFromReferencerID = HashMap<String, LinkedBoundary>()
     val linkedBoundariesFromReferencedID = HashMap<String, MutableList<LinkedBoundary>>()
-    val usedSubTemplates = HashMap<SubTemplateReference, TaTemplateInfo>()
+    val subTemplateInstances = LinkedHashMap<SubTemplateReference, SubTemplateUsage>()
     val boundaryEdges = HashMap<Transition, BoundaryEdgeInfo>()
 
     val isSubTemplate = boundaryInfo != null
@@ -86,7 +92,7 @@ class TaTemplateInfo(
     var hasPassedReferenceCheck = false
     var hasPassedCycleCheck = true // Is set to false if necessary
     var hasRedefinition = false
-    val canBeMapped: Boolean get() = hasPassedIndexing && hasPassedReferenceCheck && hasPassedCycleCheck && !hasRedefinition && usedSubTemplates.values.all { it.canBeMapped }
+    val canBeMapped: Boolean get() = hasPassedIndexing && hasPassedReferenceCheck && hasPassedCycleCheck && !hasRedefinition && subTemplateInstances.values.all { it.referencedInfo!!.canBeMapped }
 }
 
 
@@ -107,6 +113,7 @@ class AioCompModelIndex {
 
     lateinit var model: Model
     lateinit var exprConfre: GuardedConfre
+    lateinit var selectConfre: GuardedConfre
 
     val taTemplates = LinkedHashMap<String, TaTemplateInfo>()
     val subTemplates = LinkedHashMap<String, TaTemplateInfo>()
@@ -149,16 +156,16 @@ class AioCompModelIndex {
 
     private fun getCircularReferences(current: TaTemplateInfo, path: MutableList<TaTemplateInfo>):
             Sequence<Pair<UppaalPath, LinkedHashSet<TaTemplateInfo>>> = sequence {
-        for (usage in current.usedSubTemplates)
-            if (usage.value in path) {
+        for (usage in current.subTemplateInstances)
+            if (usage.value.referencedInfo!! in path) {
                 val index = current.element.subtemplatereferences.indexOf(usage.key)
                 val uppaalPath = current.path.extend(usage.key, index)
-                val cycle = linkedSetOf(*path.dropWhile { it != usage.value }.toTypedArray()) // Must use array and "unpack" to get correct return types
+                val cycle = linkedSetOf(*path.dropWhile { it != usage.value.referencedInfo }.toTypedArray()) // Must use array and "unpack" to get correct return types
                 yield(Pair(uppaalPath, cycle))
             }
             else {
-                path.add(usage.value)
-                yieldAll(getCircularReferences(usage.value, path))
+                path.add(usage.value.referencedInfo!!)
+                yieldAll(getCircularReferences(usage.value.referencedInfo!!, path))
                 path.removeLast()
             }
     }

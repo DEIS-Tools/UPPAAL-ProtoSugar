@@ -5,11 +5,9 @@ import tools.indexing.text.types.Type
 import tools.parsing.GuardedParseTree
 import uppaal.model.TextUppaalPojo
 
-class FunctionDecl(
+open class EvaluableDecl(
     identifier: String, parent: DeclarationHolder,
     parseTree: GuardedParseTree,
     source: TextUppaalPojo,
-    evalType: Type
-) : EvaluableDecl(identifier, parent, parseTree, source, evalType) {
-    // TODO: Parameter declarations shortcut????
-}
+    val evalType: Type
+) : FieldDecl(identifier, parent, parseTree, source)

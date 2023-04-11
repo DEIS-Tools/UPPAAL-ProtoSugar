@@ -9,5 +9,5 @@ class ParameterDecl(
     identifier: String, parent: DeclarationHolder,
     parseTree: GuardedParseTree,
     source: TextUppaalPojo,
-    override val evalType: Type
-) : FieldDecl(identifier, parent, parseTree, source), Evaluable
+    evalType: Type
+) : EvaluableDecl(identifier, parent, parseTree, source, evalType)

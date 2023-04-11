@@ -2,6 +2,7 @@ package tools.indexing.text
 
 import tools.indexing.DeclarationBase
 import tools.indexing.DeclarationHolder
+import tools.indexing.Textual
 import tools.parsing.GuardedParseTree
 import uppaal.model.TextUppaalPojo
 

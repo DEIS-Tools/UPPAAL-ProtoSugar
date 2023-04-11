@@ -5,8 +5,9 @@ import tools.indexing.text.FunctionDecl
 import tools.indexing.text.ParameterDecl
 import tools.indexing.text.TypedefDecl
 import tools.indexing.text.VariableDecl
-import tools.indexing.text.types.IntType
+import tools.indexing.text.types.primitive.IntType
 import tools.indexing.text.types.Type
+import tools.indexing.text.types.modifiers.ReferenceType
 import tools.indexing.tree.Model
 import tools.indexing.tree.TemplateDecl
 import tools.indexing.tree.TransitionDecl
@@ -49,9 +50,10 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
         when (uppaalPojo) {
             is Parameter -> parameterNode(uppaalPojo)
             is Declaration -> declarationNode(uppaalPojo)
+            is Transition -> transitionNode(uppaalPojo)
             is System -> systemNode(uppaalPojo)
         }
-        // TODO: Transitions, locations, labels, ... names(?), etc.
+        // TODO: locations, labels, ... names(?), etc.
     }
 
     private fun parameterNode(parameter: Parameter) {
@@ -64,6 +66,10 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
             registerDeclaration(decl, declaration)
     }
 
+    private fun transitionNode(uppaalPojo: Transition) {
+        // TODO
+    }
+
     private fun systemNode(system: System) {
         // TODO: Partial instantiations
         for (decl in declarationConfre.findAll(system.content))
@@ -71,7 +77,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
     }
 
     private fun registerDeclaration(parseTree: GuardedParseTree, sourcePojo: TextUppaalPojo) {
-        val varOrFunc = parseTree.findNonTerminal("VarOrFunction")
+        val varOrFunc = parseTree.findFirstNonTerminal("VarOrFunction")
         if (varOrFunc != null) {
             return if (varOrFunc[2]!![0]!!.isLeaf && varOrFunc[2]!![0]!!.leaf.token?.value == "(")
                 parseFunction(varOrFunc, sourcePojo)
@@ -79,7 +85,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
                 parseVariable(varOrFunc, sourcePojo)
         }
 
-        val typedef = parseTree.findNonTerminal("Typedef")
+        val typedef = parseTree.findFirstNonTerminal("Typedef")
         if (typedef != null)
             return parseTypedef(typedef, sourcePojo)
 
@@ -90,12 +96,17 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
 
 
     private fun parseParameter(parseTree: GuardedParseTree, parameter: Parameter) {
+        var type = parseTypeNode(parseTree[0]!!, parameter)
+        // TODO: Handle arrays
+        if (!parseTree[1]!!.isBlank)
+            type = ReferenceType(type)
+
         ParameterDecl(
-            parseTree[1]!!.toString(),
+            parseTree[2]!!.toString(),
             currentScope,
             parseTree,
             parameter,
-            parseType(parseTree[0]!!, parameter)
+            type
         )
     }
 
@@ -105,7 +116,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
             currentScope,
             parseTree,
             sourcePojo,
-            parseType(parseTree[0]!!, sourcePojo),
+            parseTypeNode(parseTree, sourcePojo),
             null // TODO: Try evaluate constant expr
         )
     }
@@ -117,7 +128,7 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
             currentScope,
             parseTree,
             sourcePojo,
-            parseType(parseTree[0]!!, sourcePojo)
+            parseTypeNode(parseTree, sourcePojo)
         )
     }
 
@@ -127,12 +138,12 @@ class IndexingModelWalker(syntaxRegistry: SyntaxRegistry) : ModelWalkerBase() {
             currentScope,
             parseTree,
             sourcePojo,
-            parseType(parseTree[1]!!, sourcePojo) // TODO: Also include array type from "parseTree[3]!!" <-- index three!
+            parseTypeNode(parseTree, sourcePojo)
         )
     }
 
 
-    private fun parseType(parseTree: GuardedParseTree, sourcePojo: UppaalPojo): Type {
+    private fun parseTypeNode(parseTree: GuardedParseTree, sourcePojo: UppaalPojo): Type {
         return IntType() // FIXME: Actually do this properly
     }
 }

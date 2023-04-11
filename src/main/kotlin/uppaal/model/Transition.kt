@@ -36,7 +36,7 @@ class Transition() : UppaalPojo { // Primary constructor needed for XML deserial
     }
 
 
-    fun getLabel(kind: String): Label? =
+    fun tryGetLabel(kind: String): Label? =
         labels.find { it.kind == kind }
 
     fun clone(): Transition =

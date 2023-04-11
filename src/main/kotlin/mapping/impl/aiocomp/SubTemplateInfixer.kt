@@ -1,7 +1,11 @@
 package mapping.impl.aiocomp
 
+import offset
 import tools.indexing.text.*
+import tools.indexing.text.types.modifiers.ReferenceType
 import tools.indexing.tree.TemplateDecl
+import tools.parsing.GuardedConfre
+import tools.parsing.GuardedParseTree
 import tools.restructuring.TextRewriter
 import uppaal.model.*
 
@@ -11,10 +15,9 @@ class SubTemplateInfixer {
 
         @JvmStatic
         fun infix(info: TaTemplateInfo, index: AioCompModelIndex): Template {
-            val result = flatten(info, index, emptyList())
+            val result = flatten(info, index, emptyList(), emptyList(), "")
             result.name.content = "_infixed_${info.trueName}"
             result.init = info.element.init?.clone()
-            result.parameter = info.element.parameter?.clone()
             result.subtemplatereferences.clear()
             result.boundarypoints.clear()
 
@@ -26,20 +29,21 @@ class SubTemplateInfixer {
         }
 
         @JvmStatic
-        private fun flatten(currentInfo: TaTemplateInfo, index: AioCompModelIndex, declPrefix: List<String>): Template {
-            val flatSubs = currentInfo.usedSubTemplates.map {
-                Pair(
-                    flatten(it.value, index, declPrefix + it.key.name!!.content),
-                    getBoundaryInfo(currentInfo, it.key)
-                )
-            }
+        private fun flatten(currentInfo: TaTemplateInfo, index: AioCompModelIndex, declPrefix: List<String>, args: List<GuardedParseTree>, argsText: String): Template {
             val result = currentInfo.element.clone()
+            renameDeclsAndParams(index, currentInfo, result, declPrefix, args, argsText)
 
-            renameDeclsAndParams(index, currentInfo, result, declPrefix)
-
-            for ((flatSub, boundaryInfo) in flatSubs) {
-                val instanceName = boundaryInfo.getOrNull(0)?.subTemplateReference?.name?.content ?: ""
-                merge(result, flatSub, boundaryInfo, declPrefix)
+            for ((subTemUsage, trueArgNode) in currentInfo.subTemplateInstances.entries.zip(result.subtemplatereferences.map { it.arguments }))
+            {
+                // Reparse the potentially rewritten argument-node from "result.subtemplatereferences[x]" (which is a copy of the original in "currentInfo")
+                val trueArgs = trueArgNode?.content?.let { index.exprConfre.findAll(it).toList() } ?: emptyList()
+                merge(
+                    result,
+                    flatten(subTemUsage.value.referencedInfo!!, index, declPrefix + AioCompModelIndex.trueName(subTemUsage.key.name!!.content), trueArgs, trueArgNode?.content ?: ""),
+                    getBoundaryInfo(currentInfo, subTemUsage.key),
+                    declPrefix,
+                    index
+                )
             }
 
             // TODO: Later -> store back-mapping information in AioCompModelIndex
@@ -51,61 +55,134 @@ class SubTemplateInfixer {
             index: AioCompModelIndex,
             currentInfo: TaTemplateInfo,
             result: Template,
-            declPrefix: List<String>
+            declPrefix: List<String>,
+            args: List<GuardedParseTree>,
+            argsText: String
         ) {
-            // TODO: Later -> map parameter names and usages
+            val currentScope = index.model.find<TemplateDecl>(1) { it.element == currentInfo.element }
+                ?: throw Exception("Cannot find scope for template '${currentInfo.element.name.content}'")
 
-            val currentScope = index.model.find<TemplateDecl> { it.element == currentInfo.element } ?: throw Exception("Should have scope, but no?") // TODO: Proper message
             val declRewriter = TextRewriter(currentInfo.element.declaration?.content ?: "")
-            val namesToRewrite = HashSet<String>()
+            val paramRewriter = TextRewriter(currentInfo.element.parameter?.content ?: "")
 
-            // TODO: In order for scalar typedefs to remain "the same" between all instances of a sub-template, move the typedefs (w/ scalars) to the scope just above (global without nesting) with some unique name.
-            // TODO: Use use scopes and resolve logic to "protect" IDENT occurrences, i.e., IDENTs from AutoArr which are actually declarations, but are still just IDENTs in an expression
-            for (decl in currentScope.subDeclarations.filterIsInstance<FieldDecl>().filter { it !is ParameterDecl }) {
-                namesToRewrite.add(decl.identifier)
+            val (params, nonParams) = currentScope.subDeclarations.filterIsInstance<FieldDecl>().partition { it is ParameterDecl }
+            val namesToReplace = HashMap<String, String>()
+            val namesToQualify = HashSet<String>()
+
+            // Rename/qualify parameters depending on the type of template
+            for (param in params.withIndex()) {
+                if ((param.value as ParameterDecl).evalType.hasMod<ReferenceType>() && currentInfo.isSubTemplate) // Only if sub-template since uppaal natively handles references at the "top-level"
+                    namesToReplace[param.value.identifier] = args[param.index].toStringNotNull()
+                else {
+                    namesToQualify.add(param.value.identifier)
+                    if (currentInfo.isSubTemplate) { // Move param to declarations (cannot be ref-param if this is true)
+                        val paramDeclText = currentInfo.element.parameter!!.content.substring(param.value.parseTree.fullRange)
+                        val paramArgText = argsText.substring(args[param.index].fullRange)
+
+                        val newDecl = "$paramDeclText = $paramArgText;\n"
+                        val identRange = param.value.parseTree[2]!!.fullRange.offset(-param.value.parseTree.fullRange.first)
+
+                        declRewriter.insert(0, newDecl.replaceRange(identRange, qualify(param.value.identifier, declPrefix)))
+                    }
+                    else { // Directly rename parameter
+                        paramRewriter.replace(
+                            param.value.parseTree[2]!!.fullRange,
+                            qualify(param.value.identifier, declPrefix)
+                        )
+                    }
+                }
+            }
+            if (currentInfo.isSubTemplate)
+                result.parameter = null
+            else if (params.isNotEmpty())
+                result.parameter!!.content = paramRewriter.getRewrittenText()
+
+            // TODO: Later -> Use use scopes and resolve logic to "protect" IDENT occurrences, i.e., IDENTs from AutoArr which are actually declarations, but are still just IDENTs in an expression
+            // Rename declarations in "declaration node"
+            for (decl in nonParams) {
+                namesToQualify.add(decl.identifier)
                 when (decl) {
-                    is FunctionDecl -> throw Exception("Not supported yet")
+                    is FunctionDecl -> {
+                        declRewriter.replace(decl.parseTree.findAllTerminals("IDENT").first().fullRange, qualify(decl.identifier, declPrefix))
+                        for (expr in decl.parseTree.findAllNonTerminals("Expression", onlyLocal = false, onlyVisible = false))
+                            rewriteIdentNodes(declRewriter, expr, namesToQualify, namesToReplace, declPrefix)
+                    }
                     is VariableDecl, is TypedefDecl -> {
                         declRewriter.replace(decl.parseTree.findAllTerminals("IDENT").first().fullRange, qualify(decl.identifier, declPrefix))
                         if (decl is VariableDecl)
-                            decl.parseTree[2]!!.findAllTerminals("IDENT", onlyLocal = false, onlyVisible = false).filter { it.leaf.token!!.value in namesToRewrite }.forEach {
-                                declRewriter.replace(it.fullRange, qualify(it.leaf.token!!.value, declPrefix))
-                            }
+                            rewriteIdentNodes(declRewriter, decl.parseTree[2]!!, namesToQualify, namesToReplace, declPrefix)
                     }
+                    else -> continue // TODO: Later -> Support for extensibility so that PaCha can find/mark uses in sync-label? Should probably be done in an earlier parsing phase
                 }
             }
-            for (label in result.locations.asSequence().flatMap { it.labels } + result.transitions.asSequence().flatMap { it.labels }) // TODO: Rewrite arguments given in sub-template-reference
-            {
-                // TODO: Transition scopes to protect against wrongful rewrite (goes for select label decls and PaCha (meta) decls)
-                val labelRewriter = TextRewriter(label.content)
-                val confre = when (label.kind) {
-                    Label.KIND_GUARD, Label.KIND_UPDATE, Label.KIND_INVARIANT -> index.exprConfre
-                    else -> continue // TODO: Support for select.
-                                     // TODO: Support for extensibility so that PaCha can find uses in sync-label
-                }
-
-                for (tree in confre.findAll(label.content)) {
-                    tree.findAllTerminals("IDENT", onlyLocal = false, onlyVisible = false).filter { it.leaf.token!!.value in namesToRewrite }.forEach {
-                        labelRewriter.replace(it.fullRange, qualify(it.leaf.token!!.value, declPrefix))
-                    }
-                }
-
-                label.content = labelRewriter.getRewrittenText()
-            }
-
             result.declaration = Declaration(declRewriter.getRewrittenText())
 
-            // TODO: Rewrite usages outside "declaration node" (edges, etc.)
-            //  HOWEVER! If the scope shadows the name, such as in an edge with a select statement, do NOT overwrite the name
+            // Rename usages of renamed declarations on locations
+            for (label in result.locations.asSequence().flatMap { it.labels })
+                rewriteLabel(label, index.exprConfre, namesToQualify, namesToReplace, declPrefix)
 
-            for (location in result.locations) // TODO: Is there a need to map location-name-usages???
+            // Rename usages of renamed declarations on edges
+            for (edge in result.transitions) {
+                val selectIdentifiers = edge.tryGetLabel(Label.KIND_SELECT)
+                    ?.let { index.selectConfre.findAll(it.content) }
+                    ?.map { it.findAllTerminals("IDENT").first().leaf.token!!.value }
+                    ?.toSet()
+                    ?: emptySet()
+
+                for (label in edge.labels) {
+                    val confre = when (label.kind) {
+                        Label.KIND_GUARD, Label.KIND_UPDATE, Label.KIND_INVARIANT -> index.exprConfre
+                        Label.KIND_SELECT -> index.selectConfre
+                        else -> continue // TODO: Later -> Support for extensibility so that PaCha can find/mark uses in sync-label? Should probably be done in an earlier parsing phase
+                    }
+
+                    rewriteLabel(label, confre, namesToQualify - selectIdentifiers, namesToReplace, declPrefix)
+                }
+            }
+
+            // Rewrite arguments given in sub-template-reference
+            for (subTemRef in result.subtemplatereferences.filter { it.arguments != null })
+                rewriteLabel(subTemRef.arguments!!, index.exprConfre, namesToQualify, namesToReplace, declPrefix)
+
+            // Map location names (does not map "usages" since this only happens in the query phase).
+            for (location in result.locations)
                 location.name?.let { it.content = qualify(it.content, declPrefix) }
         }
 
         @JvmStatic
-        private fun merge(parent: Template, flatSub: Template, boundaryInfo: List<LinkedBoundary>, declPrefix: List<String>) {
+        private fun rewriteLabel(
+            labelOrName: TextUppaalPojo,
+            confre: GuardedConfre,
+            namesToQualify: Set<String>,
+            namesToReplace: HashMap<String, String>,
+            declPrefix: List<String>
+        ) {
+            val rewriter = TextRewriter(labelOrName.content)
+            for (tree in confre.findAll(labelOrName.content)) {
+                rewriteIdentNodes(rewriter, tree, namesToQualify, namesToReplace, declPrefix)
+            }
+            labelOrName.content = rewriter.getRewrittenText()
+        }
+
+        private fun rewriteIdentNodes(
+            rewriter: TextRewriter,
+            tree: GuardedParseTree,
+            namesToQualify: Set<String>,
+            namesToReplace: HashMap<String, String>,
+            declPrefix: List<String>
+        ) {
+            tree.findAllTerminals("IDENT", onlyLocal = false, onlyVisible = false)
+                .forEach {
+                    when (it.leaf.token!!.value) {
+                        in namesToQualify -> rewriter.replace(it.fullRange, qualify(it.leaf.token!!.value, declPrefix))
+                        in namesToReplace -> rewriter.replace(it.fullRange, namesToReplace[it.leaf.token!!.value]!!)
+                    }
+                }
+        }
+
+        @JvmStatic
+        private fun merge(parent: Template, flatSub: Template, boundaryInfo: List<LinkedBoundary>, declPrefix: List<String>, index: AioCompModelIndex) {
             // TODO: Later -> Adjust coordinates of locations, transitions, etc
-            // TODO: Later -> map/move/merge parameters/arguments
 
             parent.declaration!!.content += "\n\n// '${qualify(flatSub.name.content, declPrefix, ".")}' (${AioCompModelIndex.trueName(flatSub.name.content)}) below\n" + flatSub.declaration!!.content
 
@@ -121,7 +198,7 @@ class SubTemplateInfixer {
                     val newTransition = Transition()
 
                     determineIdOfSourceAndTarget(partial, newTransition, declPrefix)
-                    mergeLabels(partial, newTransition)
+                    mergeLabels(partial, newTransition, index)
 
                     parent.transitions.add(newTransition)
                 }
@@ -164,13 +241,12 @@ class SubTemplateInfixer {
         }
 
         @JvmStatic
-        private fun mergeLabels(partial: Partial, newTransition: Transition) {
+        private fun mergeLabels(partial: Partial, newTransition: Transition, index: AioCompModelIndex) {
             val selectLabels = extractLabels(partial, Label.KIND_SELECT)
+            fixSelectNameClashes(partial, selectLabels, index)
             if (selectLabels.isNotEmpty()) {
-                // TODO: Automatically fix name-clashes
-
                 newTransition.labels.add(
-                    Label(Label.KIND_UPDATE, 0, 0, selectLabels.joinToString("\n") { it.content })
+                    Label(Label.KIND_SELECT, 0, 0, selectLabels.joinToString(", ") { it.content })
                 )
             }
 
@@ -190,6 +266,48 @@ class SubTemplateInfixer {
                 newTransition.labels.add(
                     Label(Label.KIND_UPDATE, 0, 0, updateLabels.joinToString(", ") { it.content })
                 )
+            }
+        }
+
+        @JvmStatic
+        private fun fixSelectNameClashes(partial: Partial, selectLabels: List<Label>, index: AioCompModelIndex) {
+            if (selectLabels.size <= 1)
+                return // Clashes are impossible
+
+            val partitionedSelectTrees = selectLabels.map { index.selectConfre.findAll(it.content).toList() }
+            val partitionedSelectIdentifiers = partitionedSelectTrees.map {
+                it.map { tree -> tree.findAllTerminals("IDENT").first().leaf.token!!.value }
+            }
+
+            val allIdentifiers = partitionedSelectIdentifiers.flatten().distinct()
+            for (ident in allIdentifiers) {
+                if (partitionedSelectIdentifiers.count { selects -> ident in selects } > 1) {
+                    renameSelectIdent(ident, ident + STD_SEP + "enter", partial.entering, index)
+                    renameSelectIdent(ident, ident + STD_SEP + "inside", partial.inside, index)
+                    renameSelectIdent(ident, ident + STD_SEP + "exit", partial.exiting, index)
+                }
+            }
+        }
+
+        @JvmStatic
+        private fun renameSelectIdent(oldIdent: String, newIdent: String, edge: Transition?, index: AioCompModelIndex) {
+            if (edge == null)
+                return
+            for (label in edge.labels) {
+                val confre = when (label.kind) {
+                    Label.KIND_GUARD, Label.KIND_UPDATE, Label.KIND_INVARIANT -> index.exprConfre
+                    Label.KIND_SELECT -> index.selectConfre
+                    else -> continue // TODO: Later -> Support for extensibility so that PaCha can find/mark uses in sync-label? Should probably be done in an earlier parsing phase
+                }
+
+                val labelRewriter = TextRewriter(label.content)
+                for (tree in confre.findAll(label.content)) {
+                    tree.findAllTerminals("IDENT", onlyLocal = false, onlyVisible = false)
+                        .filter { it.leaf.token!!.value == oldIdent }.forEach {
+                            labelRewriter.replace(it.fullRange, newIdent)
+                        }
+                }
+                label.content = labelRewriter.getRewrittenText()
             }
         }
 

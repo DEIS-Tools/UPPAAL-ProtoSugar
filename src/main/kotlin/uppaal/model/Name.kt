@@ -39,3 +39,12 @@ class SubTemplateName : Name {
     override fun clone(): SubTemplateName =
         SubTemplateName(x, y, content)
 }
+
+class Arguments : Name {
+    constructor() : super()
+    constructor(x: Int, y: Int, content: String) : super(x, y, content)
+
+
+    override fun clone(): Arguments =
+        Arguments(x, y, content)
+}

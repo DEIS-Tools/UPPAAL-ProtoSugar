@@ -10,4 +10,4 @@ class TypedefDecl(
     parseTree: GuardedParseTree,
     source: TextUppaalPojo,
     val structure: Type
-) : FieldDecl(identifier, parent, parseTree, source), Textual
+) : FieldDecl(identifier, parent, parseTree, source)

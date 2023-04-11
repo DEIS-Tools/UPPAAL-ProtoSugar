@@ -9,6 +9,6 @@ class VariableDecl(
     identifier: String, parent: DeclarationHolder,
     parseTree: GuardedParseTree,
     source: TextUppaalPojo,
-    override val evalType: Type,
+    evalType: Type,
     val defaultValue: Any? = null
-) : FieldDecl(identifier, parent, parseTree, source), Evaluable
+) : EvaluableDecl(identifier, parent, parseTree, source, evalType)

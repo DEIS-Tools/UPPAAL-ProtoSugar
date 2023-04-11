@@ -3,6 +3,13 @@ package mapping.impl.aiocomp
 import mapping.base.Mapper
 import mapping.base.ModelPhase
 import mapping.base.Phases
+import tools.indexing.text.EvaluableDecl
+import tools.indexing.text.ParameterDecl
+import tools.indexing.text.types.modifiers.ConstType
+import tools.indexing.text.types.modifiers.ReferenceType
+import tools.indexing.tree.TemplateDecl
+import tools.parsing.Confre
+import tools.parsing.GuardedParseTree
 import tools.parsing.ParseTree
 import uppaal.UppaalPath
 import uppaal.messaging.UppaalMessage
@@ -22,9 +29,13 @@ class AioCompMapper : Mapper() {
 
 
     inner class ModelIndexing(val index: AioCompModelIndex) : ModelPhase() {
+        val argListConfre by lazy { generateParser("ArgList") }
+
         override fun onConfigured() {
             index.model = model
             index.exprConfre = generateParser("Expression")
+            index.selectConfre = generateParser("Select")
+
             register(::indexTemplate)
         }
 
@@ -74,10 +85,42 @@ class AioCompMapper : Mapper() {
             else if (template.boundarypoints.isNotEmpty())
                 errors.add(boundaryPointExistenceError(path))
 
-            // TODO: Later -> register declarations (parameters, variables, functions, locations, boundary points, sub-template references)
+            for (refElem in template.subtemplatereferences.withIndex()) {
+                val ref = refElem.value
+                info.subTemplateInstances[ref] = SubTemplateUsage()
+
+                if (ref.name?.content.isNullOrBlank())
+                    errors.add(blankSubTemplateReferenceNameError(path + refElem)) // TODO: Allow blank sub-template reference names
+
+                if (ref.subtemplatename?.content.isNullOrBlank())
+                    errors.add(blankSubTemplateNameInSubTemplateReferenceError(path + refElem))
+
+                // TODO: Warning -> No entry-boundarypoint on sub-template reference
+
+                val argsTree = argListConfre.matchExact(ref.arguments?.content ?: continue)
+                if (argsTree == null) {
+                    errors.add(argumentsSyntaxError(path, refElem))
+                    continue
+                }
+                val expressions = extractExpressions(argsTree)
+                if (expressions == null) {
+                    errors.add(blankArgumentError(path, refElem))
+                    continue
+                }
+
+                info.subTemplateInstances[ref]!!.arguments = expressions
+            }
 
             info.hasPassedIndexing = errors.isEmpty()
             reportAll(errors)
+        }
+
+        private fun extractExpressions(argsTree: GuardedParseTree): List<GuardedParseTree>? {
+            val expressions = ArrayList<GuardedParseTree>()
+            expressions.add(argsTree[0]!!.findFirstNonTerminal("Expression") ?: return null)
+            for (child in argsTree[1]!!.children)
+                expressions.add(child!![1]!!.findFirstNonTerminal("Expression") ?: return null)
+            return expressions
         }
 
 
@@ -86,6 +129,12 @@ class AioCompMapper : Mapper() {
 
         private fun blankBoundaryPointNameError(path: UppaalPath): UppaalMessage =
             createUppaalError(path, "The name of a boundary point cannot be blank", isUnrecoverable = true)
+
+        private fun blankSubTemplateReferenceNameError(path: UppaalPath): UppaalMessage =
+            createUppaalError(path, "The name of a sub-template reference cannot be blank (yet; feature pending)", isUnrecoverable = true)
+
+        private fun blankSubTemplateNameInSubTemplateReferenceError(path: UppaalPath): UppaalMessage =
+            createUppaalError(path, "The 'sub-template name' in a sub-template reference cannot be blank", isUnrecoverable = true)
 
         private fun redefinitionError(path: UppaalPath, info: TaTemplateInfo): UppaalMessage =
             createUppaalError(path, "Redeclaration of a (sub-)template name: '${info.element.name.content}'", isUnrecoverable = true)
@@ -109,6 +158,18 @@ class AioCompMapper : Mapper() {
             val index = template.boundarypoints.indexOf(duplicate)
             return createUppaalError(templatePath.extend(duplicate, index), "Redeclaration of local boundary point '${duplicate.name!!.content}'", isUnrecoverable = true)
         }
+
+        private fun argumentsSyntaxError(templatePath: UppaalPath, subTemplateReference: IndexedValue<SubTemplateReference>): UppaalMessage {
+            val fullPath = templatePath.plus(subTemplateReference).extend(subTemplateReference.value.arguments!!)
+            val content = subTemplateReference.value.arguments!!.content
+            return createUppaalError(fullPath, content, content.indices, "Syntax error in argument list of sub-template reference (best it can say for now...)", isUnrecoverable = true)
+        }
+
+        private fun blankArgumentError(templatePath: UppaalPath, subTemplateReference: IndexedValue<SubTemplateReference>): UppaalMessage {
+            val fullPath = templatePath.plus(subTemplateReference).extend(subTemplateReference.value.arguments!!)
+            val content = subTemplateReference.value.arguments!!.content
+            return createUppaalError(fullPath, content, content.indices, "One or more blank arguments in sub-template reference", isUnrecoverable = true)
+        }
     }
 
 
@@ -131,6 +192,7 @@ class AioCompMapper : Mapper() {
             val referencedBndPointIDsToDirs = HashMap<String, String>()
 
             // Check that sub-template references and boundary point "references" are valid
+            val parentScope = index.model.find<TemplateDecl>(1) { it.element == template }!!
             for (subTemRefElement in info.element.subtemplatereferences.withIndex()) {
                 val subTemRef = subTemRefElement.value
                 if (subTemRef.subtemplatename == null) {
@@ -138,15 +200,33 @@ class AioCompMapper : Mapper() {
                     continue
                 }
 
+                // Check that reference references a sub-template
                 val refInfo = index[subTemRef.subtemplatename!!.content]
                 if (refInfo == null || !refInfo.isSubTemplate) {
                     errors.add(invalidReferenceError((path + subTemRefElement).extend(subTemRef.subtemplatename!!), subTemRef.subtemplatename!!.content, null))
                     continue
                 }
-                info.usedSubTemplates[subTemRef] = refInfo
+                val subTemUsage = info.subTemplateInstances[subTemRef]!!
+                subTemUsage.referencedInfo = refInfo
 
-                // TODO: Later -> Check that parameters are type correct (or delegate to uppaal? Move error to some "parameters" field in reference)
+                // Check parameter and argument correctness (only check const- vs. ref-ness and nothing deeper)
+                val refScope = index.model.find<TemplateDecl>(1) { it.element == refInfo.element }!!
+                val params = refScope.findAll<ParameterDecl>(1).toList()
+                val args = subTemUsage.arguments
+                if (args.size != params.size)
+                    errors.add(unexpectedArgumentCountError((path + subTemRefElement), subTemRef.arguments, args.size, params.size))
+                else
+                    for ((param, arg) in params.zip(args))
+                        if (param.evalType.hasMod<ReferenceType>()) {
+                            val argIdent = arg.toStringNotNull()
+                            if (!Confre.identifierPattern.matches(argIdent)) // TODO: Allow array(-subscript) expressions to be given as a ref parameter
+                                errors.add(refParamMustHaveReferencableArgumentError((path + subTemRefElement).extend(subTemRef.arguments!!), subTemRef.arguments!!.content, arg))
+                            else if (parentScope.find<EvaluableDecl>(1) { it.identifier == argIdent }?.evalType?.hasMod<ConstType>() == true)
+                                errors.add(constArgumentToRefParameterError((path + subTemRefElement).extend(subTemRef.arguments!!), subTemRef.arguments!!.content, arg))
+                        }
 
+
+                // Check if boundary point references are valid
                 for (bndElement in subTemRef.boundarypoints.withIndex()) {
                     val bndPoint = bndElement.value
                     val bndName = bndPoint.name?.content
@@ -214,7 +294,7 @@ class AioCompMapper : Mapper() {
                     PathType.INCOMPLETE -> report(incompleteBoundaryPathError(bndPath.path))
                     PathType.CYCLIC -> report(cyclicBoundaryPathError(bndPath.path))
                     PathType.COMPLETE -> {
-                        val syncEdges = bndPath.path.filter { it.edge.getLabel(Label.KIND_SYNC) != null }
+                        val syncEdges = bndPath.path.mapNotNull { it.edge.tryGetLabel(Label.KIND_SYNC) }
                         if (syncEdges.size > 1)
                             report(multipleSyncOnBoundaryPathError(bndPath.path, syncEdges))
                     }
@@ -245,7 +325,7 @@ class AioCompMapper : Mapper() {
 
         private fun noReferenceError(path: UppaalPath, subTemRefIsProblem: Boolean): UppaalMessage =
             if (subTemRefIsProblem)
-                createUppaalError(path, "A sub-template reference must reference some sub-template name", isUnrecoverable = true)
+                createUppaalError(path, "A sub-template reference must reference some sub-template name", isUnrecoverable = true) // TODO: More correct message
             else
                 createUppaalError(path, "A boundary point on sub-template reference must have a non-blank name", isUnrecoverable = true)
 
@@ -279,9 +359,13 @@ class AioCompMapper : Mapper() {
             return createUppaalError(boundaryPath.first().templateInfo.path, "Cyclic path starting in entry to a reference to '${boundaryPath.first().templateInfo.trueName}'", isUnrecoverable = true)
         }
 
-        private fun multipleSyncOnBoundaryPathError(boundaryPath: List<BoundaryPathNode>, syncEdges: List<BoundaryPathNode>): UppaalMessage {
+        private fun multipleSyncOnBoundaryPathError(boundaryPath: List<BoundaryPathNode>, syncEdges: List<Label>): UppaalMessage {
             // TODO: Proper message and path
-            return createUppaalError(boundaryPath.first().templateInfo.path, "Multiple 'sync'-labels (${syncEdges.joinToString { "'$it'" }}) on path starting in entry to a reference to '${boundaryPath.first().templateInfo.trueName}'", isUnrecoverable = true)
+            return createUppaalError(
+                boundaryPath.first().templateInfo.path,
+                "Multiple 'sync'-labels (${syncEdges.joinToString { "'${it.content}'" }}) on path starting in entry to a reference to '${boundaryPath.first().templateInfo.trueName}'",
+                isUnrecoverable = true
+            )
         }
 
         private fun userCodeInstantiatesSubTemplateError(path: UppaalPath, code: String, node: ParseTree): UppaalMessage =
@@ -289,6 +373,19 @@ class AioCompMapper : Mapper() {
 
         private fun partialInstantiationIsSubTemplateError(path: UppaalPath, code: String, node: ParseTree): UppaalMessage =
             createUppaalError(path, code, node, "A partial instantiation cannot be a sub-template", isUnrecoverable = true)
+
+        private fun unexpectedArgumentCountError(subTemRefPath: UppaalPath, arguments: Arguments?, argCount: Int, paramCount: Int): UppaalMessage {
+            return if (arguments == null)
+                createUppaalError(subTemRefPath, "A sub-template reference expected '$paramCount' arguments, but got '$argCount'", isUnrecoverable = true)
+            else
+                createUppaalError(subTemRefPath.extend(arguments), arguments.content, arguments.content.indices, "A sub-template reference expected '$paramCount' arguments, but got '$argCount'", isUnrecoverable = true)
+        }
+
+        private fun refParamMustHaveReferencableArgumentError(path: UppaalPath, code: String, arg: GuardedParseTree): UppaalMessage =
+            createUppaalError(path, code, arg.tree, "An argument given to a reference parameter must be referencable (i.e., simply an identifier. Note that subscripted arrays are currently not supported)", isUnrecoverable = true)
+
+        private fun constArgumentToRefParameterError(path: UppaalPath, code: String, arg: GuardedParseTree): UppaalMessage =
+            createUppaalError(path, code, arg.tree, "An argument given to a reference parameter cannot be constant since const-ness will be lost. Switch to a constant parameter instead.", isUnrecoverable = true)
     }
 
 

@@ -9,7 +9,8 @@ import kotlin.reflect.KClass
 data class AddTerminal(val name: String, val pattern: String)
 data class AddNonTerminal(val name: String, val grammar: String, val sourceMapper: KClass<out Mapper>? = null) {
     init {
-        assert(grammar.endsWith('.')) { "Non-terminal grammar must end with a 'dot'" }
+        if (!grammar.trimEnd().endsWith('.'))
+            throw Exception("Non-terminal grammar '$name' must end with a 'dot'")
     }
 }
 data class ForkNonTerminal(val baseNonTerminal: String, val newName: String, val sourceMapper: KClass<out Mapper>)
@@ -30,40 +31,45 @@ class SyntaxRegistry {
 
     private val nonTerminals = mutableListOf(
         AddNonTerminal("Declaration",   "VarOrFunction | Typedef ."),
-        AddNonTerminal("VarOrFunction", "Type IDENT (Subscripts ['=' (Expression | ArrayInit)] ';' | '(' ParamList ')' Body) ."), // TODO: Allow chained declarations (e.g., "int i, j, k;")
+        AddNonTerminal("VarOrFunction", "Type IDENT (Subscripts ['=' (Expression | ArrayInit)] ';' | '(' ParamList ')' Block) ."), // TODO: Allow chained declarations (e.g., "int i, j, k;")
         AddNonTerminal("Typedef",       "'typedef' Type IDENT Subscripts ';' ."),
 
         AddNonTerminal("ArrayInit",     "'{' [ArrayInitTerm] {',' [ArrayInitTerm]} '}' ."),
         AddNonTerminal("ArrayInitTerm", "ArrayInit | Expression ."),
         AddNonTerminal("Subscripts",    "{'[' [Expression] ']'} ."),
 
-        AddNonTerminal("Body",          "'{' {Statement} '}' ."),
-        AddNonTerminal("Statement",     "Body | ['return'] [Expression] ';' ."), // TODO
-        AddNonTerminal("If",            " Body ."),
-        AddNonTerminal("While",         " Body ."), // TODO
-        AddNonTerminal("For",           " Body ."),
+        AddNonTerminal("Block",         "'{' {Declaration | Statement} '}' ."),
+        AddNonTerminal("Statement",     "Block | ';' | Expression ';' | If | While | DoWhile | For | Iteration | Return ."),
+        AddNonTerminal("If",            " 'if' '(' [Expression] ')' Statement ['else' Statement] ."),
+        AddNonTerminal("While",         " 'while' '(' [Expression] ')' Statement ."),
+        AddNonTerminal("DoWhile",       " 'do' Statement 'while' '(' [Expression] ')' ';' ."),
+        AddNonTerminal("For",           " 'for' '(' [Expression] ';' [Expression] ';' [Expression] ')' Statement ."),
+        AddNonTerminal("Iteration",     " 'for' '(' Select ')' Statement ."),
+        AddNonTerminal("Return",        " 'return' [Expression] ';' ."),
 
         AddNonTerminal("ParamList",     "[Param] {',' [Param]} ."),
-        AddNonTerminal("Param",         "Type ['&'] IDENT Subscripts"),
+        AddNonTerminal("Param",         "Type ['&'] IDENT Subscripts ."),
         AddNonTerminal("ArgList",       "[Expression] {',' [Expression]} ."),
 
         AddNonTerminal("Expression",    "[Unary | Increment] ('(' Expression ')' | ExtendedTerm {'.' [ExtendedTerm]} | Quantifier) [Increment] [(Binary|Assignment) Expression | Ternary] ."),
         AddNonTerminal("ExtendedTerm",  "Term [Subscripts | '(' ArgList ')'] ."),
         AddNonTerminal("Term",          "IDENT | NUMBER | BOOL | 'deadlock' ."),
-        AddNonTerminal("Quantifier",    "('forall' | 'exists' | 'sum') '(' IDENT ':' Type ')' Expression ."),
+        AddNonTerminal("Quantifier",    "('forall' | 'exists' | 'sum') '(' Select ')' Expression ."),
         AddNonTerminal("Unary",         "'+' | '-' | '!' | 'not' ."),
         AddNonTerminal("Increment",     "'++' | '--' ."),
         AddNonTerminal("Binary",        "'<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' ."),
         AddNonTerminal("Assignment",    "'=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' ."),
         AddNonTerminal("Ternary",       "'?' Expression ':' Expression ."),
 
-        AddNonTerminal("Type",          "['const'|'meta'] (NonStruct | Struct) ."), // TODO  "|'&'" and "[Subscripts]" <- CompactType
+        AddNonTerminal("Type",          "['urgent'|'broadcast'|'const'|'meta'] (NonStruct | Struct) ."), // TODO  "|'&'" and "[Subscripts]" <- CompactType
         AddNonTerminal("NonStruct",     "IDENT ['[' [Expression] [',' [Expression]] ']'] ."), // TODO   "| '(' [CompactType] {',' [CompactType]} ')'"
         AddNonTerminal("Struct",        "'struct' '{' StructField {StructField} '}' ."),
         AddNonTerminal("StructField",   "Type IDENT Subscripts {',' IDENT Subscripts} ';' ."),
 
-        AddNonTerminal("PartialInst",  "IDENT ['(' ParamList ')'] '=' IDENT '(' ArgList ')' ';' ."),
-        AddNonTerminal("SystemLine",   "'system' [IDENT] {',' [IDENT]} ';'."),
+        AddNonTerminal("PartialInst",   "IDENT ['(' ParamList ')'] '=' IDENT '(' ArgList ')' ';' ."),
+        AddNonTerminal("SystemLine",    "'system' [IDENT] {',' [IDENT]} ';' ."),
+
+        AddNonTerminal("Select",        "IDENT ':' Type ."),
 
         //AddNonTerminal("", ""),
         //TODO: Queries
@@ -365,11 +371,16 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
     }
     fun getUnguarded(visibleIndex: Int): ParseTree? = getVisibleChild(visibleIndex)
 
-    fun findNonTerminal(nonTerminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): GuardedParseTree? {
+
+    fun findFirstNonTerminal(nonTerminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true) =
+        findAllNonTerminals(nonTerminalName, onlyLocal, onlyVisible).firstOrNull()
+    fun findAllNonTerminals(nonTerminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): Sequence<GuardedParseTree> {
         assert(getNonTerminalSafety(nonTerminalName) == Safety.SAFE) { "Cannot search for an unsafe non-terminal" }
-        return findNonTerminal(nonTerminalName)
+        return findNonTerminals(nonTerminalName, onlyLocal, onlyVisible)
     }
 
+    fun findFirstTerminal(terminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true) =
+        findAllTerminals(terminalName, onlyLocal, onlyVisible).firstOrNull()
     fun findAllTerminals(terminalName: String, onlyLocal: Boolean = true, onlyVisible: Boolean = true): Sequence<GuardedParseTree> {
         assert(Confre.identifierPattern.matches(terminalName)) { "'$terminalName' is not a valid terminal name" }
         return findTerminals(terminalName, onlyLocal, onlyVisible)
@@ -457,19 +468,15 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
         }
     }
 
-    /** Local search for non-terminal **/ // TODO: Implement global search, non-visible search, and behind-unsafe-search
-    private fun findNonTerminal(nonTerminalName: String): GuardedParseTree? {
-        for (internalChild in visibleIndices.map { node.children[it] }.filterIsInstance<Node>()) {
-            if (internalChild.grammar is NonTerminalRef) {
-                if (internalChild.grammar.nonTerminalName == nonTerminalName)
-                    return getGuarded(internalChild)
-            } else {
-                return getUnsafe(internalChild).findNonTerminal(nonTerminalName)
-                    ?: continue
-            }
+    /** Local search for non-terminal **/ // TODO: Implement behind-unsafe-search or make check on guardedParseTree to see if on safe branch?
+    private fun findNonTerminals(nonTerminalName: String, onlyLocal: Boolean, onlyVisible: Boolean): Sequence<GuardedParseTree> = sequence {
+        val chosenIndices = if (onlyVisible) visibleIndices else parseTree.asNode().children.indices
+        for (internalChild in chosenIndices.map { node.children[it] }.filterIsInstance<Node>()) {
+            if (internalChild.grammar is NonTerminalRef && internalChild.grammar.nonTerminalName == nonTerminalName)
+                yield(getGuarded(internalChild))
+            else if (internalChild.grammar !is TerminalRef && (!onlyLocal || internalChild.grammar !is NonTerminalRef))
+                yieldAll(getUnsafe(internalChild).findNonTerminals(nonTerminalName, onlyLocal, onlyVisible))
         }
-
-        return null
     }
 
     /** Local search for terminal **/ // TODO: Implement behind-unsafe-search or make check on guardedParseTree to see if on safe branch?
@@ -479,9 +486,8 @@ class GuardedParseTree(private val parseTree: ParseTree, private val localSafety
             if (internalChild.grammar is TerminalRef) {
                 if ((internalChild.grammar as TerminalRef).terminalName == terminalName)
                     yield(getGuarded(internalChild))
-            } else if (!onlyLocal || internalChild.grammar !is NonTerminalRef) {
+            } else if (!onlyLocal || internalChild.grammar !is NonTerminalRef)
                 yieldAll(getUnsafe(internalChild).findTerminals(terminalName, onlyLocal, onlyVisible))
-            }
         }
     }
 

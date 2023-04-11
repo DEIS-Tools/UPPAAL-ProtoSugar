@@ -37,33 +37,23 @@ abstract class DeclarationHolder {
     }
 
 
-    /** Find an identifier based on "something (TODO: dot notation? Figure out as we go)" **/
-    fun <T> find(/* Something */): T? {
-        return null
-    }
-
-
     // TODO: May require different-search strategies (depth first? breadth first? Something else? This might not even make sense to allow in the first place)
-    inline fun <reified T : DeclarationHolder> find(noinline predicate: (T) -> Boolean): T?
-        = find(predicate, T::class.java)
+    inline fun <reified T : DeclarationHolder> find(maxDepth: Int, noinline predicate: ((T) -> Boolean)?): T?
+        = findAll(predicate, T::class.java, maxDepth).firstOrNull()
+    inline fun <reified T : DeclarationHolder> findAll(maxDepth: Int, noinline predicate: ((T) -> Boolean)? = null): Sequence<T>
+        = findAll(predicate, T::class.java, maxDepth)
 
-    fun <T : DeclarationHolder> find(predicate: (T) -> Boolean, targetClass: Class<T>): T? {
-        return subDeclarations.asSequence().filterIsInstance(targetClass).find(predicate)
-            ?: subDeclarations.firstNotNullOfOrNull { it.find(predicate, targetClass) }
+    fun <T : DeclarationHolder> findAll(predicate: ((T) -> Boolean)?, targetClass: Class<T>, maxDepth: Int): Sequence<T> {
+        if (maxDepth <= 0)
+            return emptySequence()
+
+        var sequence = _subDeclarations.asSequence().filterIsInstance(targetClass)
+        if (predicate != null)
+            sequence = sequence.filter(predicate)
+
+        return if (maxDepth == 1) sequence
+        else sequence + _subDeclarations.asSequence().flatMap { it.findAll(predicate, targetClass, maxDepth-1) }
     }
-
-
-    inline fun <reified T : DeclarationHolder> findAll(noinline predicate: ((T) -> Boolean)?): Sequence<T> {
-        val sequence = subDeclarations.asSequence().filterIsInstance<T>()
-        return if (predicate == null) sequence
-        else sequence.filter(predicate)
-    }
-
-    //fun <T : DeclarationHolder> findAll(predicate: ((T) -> Boolean)?, targetClass: Class<T>): Sequence<T> {
-    //    val sequence = subDeclarations.asSequence().filterIsInstance(targetClass)
-    //    return if (predicate == null) sequence
-    //    else sequence.filter(predicate)
-    //}
 }
 
 fun DeclarationHolder.parentOrSelf(): DeclarationHolder
