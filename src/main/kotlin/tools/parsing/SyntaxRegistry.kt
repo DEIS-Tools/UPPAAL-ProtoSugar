@@ -30,47 +30,50 @@ class SyntaxRegistry {
     )
 
     private val nonTerminals = mutableListOf(
-        AddNonTerminal("Declaration",   "VarOrFunction | Typedef ."),
-        AddNonTerminal("VarOrFunction", "Type IDENT (Subscripts ['=' (Expression | ArrayInit)] ';' | '(' ParamList ')' Block) ."), // TODO: Allow chained declarations (e.g., "int i, j, k;")
-        AddNonTerminal("Typedef",       "'typedef' Type IDENT Subscripts ';' ."),
+        AddNonTerminal("Declaration",     "VarOrFunction | Typedef ."),
+        AddNonTerminal("VarOrFunction",   "Type IDENT (Subscripts ['=' (Expression | ArrayInit)] ';' | '(' ParamList ')' Block) ."), // TODO: Allow chained declarations (e.g., "int i, j, k;")
+        AddNonTerminal("Typedef",         "'typedef' Type IDENT Subscripts ';' ."),
 
-        AddNonTerminal("ArrayInit",     "'{' [ArrayInitTerm] {',' [ArrayInitTerm]} '}' ."),
-        AddNonTerminal("ArrayInitTerm", "ArrayInit | Expression ."),
-        AddNonTerminal("Subscripts",    "{'[' [Expression] ']'} ."),
+        AddNonTerminal("ArrayInit",       "'{' [ArrayInitTerm] {',' [ArrayInitTerm]} '}' ."),
+        AddNonTerminal("ArrayInitTerm",   "ArrayInit | Expression ."),
+        AddNonTerminal("Subscripts",      "{'[' [Expression] ']'} ."),
 
-        AddNonTerminal("Block",         "'{' {Declaration | Statement} '}' ."),
-        AddNonTerminal("Statement",     "Block | ';' | Expression ';' | If | While | DoWhile | For | Iteration | Return ."),
-        AddNonTerminal("If",            " 'if' '(' [Expression] ')' Statement ['else' Statement] ."),
-        AddNonTerminal("While",         " 'while' '(' [Expression] ')' Statement ."),
-        AddNonTerminal("DoWhile",       " 'do' Statement 'while' '(' [Expression] ')' ';' ."),
-        AddNonTerminal("For",           " 'for' '(' [Expression] ';' [Expression] ';' [Expression] ')' Statement ."),
-        AddNonTerminal("Iteration",     " 'for' '(' Select ')' Statement ."),
-        AddNonTerminal("Return",        " 'return' [Expression] ';' ."),
+        AddNonTerminal("Block",           "'{' {Declaration | Statement} '}' ."),
+        AddNonTerminal("Statement",       "Block | ';' | Expression ';' | If | While | DoWhile | For | Iteration | Return ."),
+        AddNonTerminal("If",              " 'if' '(' [Expression] ')' Statement ['else' Statement] ."),
+        AddNonTerminal("While",           " 'while' '(' [Expression] ')' Statement ."),
+        AddNonTerminal("DoWhile",         " 'do' Statement 'while' '(' [Expression] ')' ';' ."),
+        AddNonTerminal("For",             " 'for' '(' [Expression] ';' [Expression] ';' [Expression] ')' Statement ."),
+        AddNonTerminal("Iteration",       " 'for' '(' Select ')' Statement ."),
+        AddNonTerminal("Return",          " 'return' [Expression] ';' ."),
 
-        AddNonTerminal("ParamList",     "[Param] {',' [Param]} ."),
-        AddNonTerminal("Param",         "Type ['&'] IDENT Subscripts ."),
-        AddNonTerminal("ArgList",       "[Expression] {',' [Expression]} ."),
+        AddNonTerminal("ParamList",       "[Param] {',' [Param]} ."),
+        AddNonTerminal("Param",           "Type ['&'] IDENT Subscripts ."),
+        AddNonTerminal("ArgList",         "[Expression] {',' [Expression]} ."),
 
-        AddNonTerminal("Expression",    "[Unary | Increment] ('(' Expression ')' | ExtendedTerm {'.' [ExtendedTerm]} | Quantifier) [Increment] [(Binary|Assignment) Expression | Ternary] ."),
-        AddNonTerminal("ExtendedTerm",  "Term [Subscripts | '(' ArgList ')'] ."),
-        AddNonTerminal("Term",          "IDENT | NUMBER | BOOL | 'deadlock' ."),
-        AddNonTerminal("Quantifier",    "('forall' | 'exists' | 'sum') '(' Select ')' Expression ."),
-        AddNonTerminal("Unary",         "'+' | '-' | '!' | 'not' ."),
-        AddNonTerminal("Increment",     "'++' | '--' ."),
-        AddNonTerminal("Binary",        "'<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' ."),
-        AddNonTerminal("Assignment",    "'=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' ."),
-        AddNonTerminal("Ternary",       "'?' Expression ':' Expression ."),
+        AddNonTerminal("Expression",      "[Unary | Increment] ('(' Expression ')' | ExtendedTerm | Quantifier) [Increment] [(Binary|Assignment) Expression | Ternary] ."),
+        AddNonTerminal("ExtendedTerm",    "Term [Subscripts | '(' ArgList ')'] ['.' [ExtendedTerm]]."),
+        AddNonTerminal("Term",            "IDENT | NUMBER | BOOL | 'deadlock' ."),
+        AddNonTerminal("Quantifier",      "('forall' | 'exists' | 'sum') '(' Select ')' Expression ."),
+        AddNonTerminal("Unary",           "'+' | '-' | '!' | 'not' ."),
+        AddNonTerminal("Increment",       "'++' | '--' ."),
+        AddNonTerminal("Binary",          "'<' | '<=' | '==' | '!=' | '>=' | '>' | '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '<<' | '>>' | '&&' | '||' | '<?' | '>?' | 'or' | 'and' | 'imply' ."),
+        AddNonTerminal("Assignment",      "'=' | ':=' | '+=' | '-=' | '*=' | '/=' | '%=' | '|=' | '&=' | '^=' | '<<=' | '>>=' ."),
+        AddNonTerminal("Ternary",         "'?' Expression ':' Expression ."),
 
-        AddNonTerminal("Type",          "['urgent'|'broadcast'|'const'|'meta'] (NonStruct | Struct) ."), // TODO  "|'&'" and "[Subscripts]" <- CompactType
-        AddNonTerminal("NonStruct",     "IDENT ['[' [Expression] [',' [Expression]] ']'] ."), // TODO   "| '(' [CompactType] {',' [CompactType]} ')'"
-        AddNonTerminal("Struct",        "'struct' '{' StructField {StructField} '}' ."),
-        AddNonTerminal("StructField",   "Type IDENT Subscripts {',' IDENT Subscripts} ';' ."),
+        AddNonTerminal("Type",            "['urgent'|'broadcast'|'const'|'meta'] (NonStruct | Struct) ."), // TODO  "|'&'" and "[Subscripts]" <- CompactType
+        AddNonTerminal("NonStruct",       "IDENT ['[' [Expression] [',' [Expression]] ']'] ."), // TODO   "| '(' [CompactType] {',' [CompactType]} ')'"
+        AddNonTerminal("Struct",          "'struct' '{' StructField {StructField} '}' ."),
+        AddNonTerminal("StructField",     "Type IDENT Subscripts {',' IDENT Subscripts} ';' ."),
 
-        AddNonTerminal("PartialInst",   "IDENT ['(' ParamList ')'] '=' IDENT '(' ArgList ')' ';' ."),
-        AddNonTerminal("SystemLine",    "'system' [IDENT] {',' [IDENT]} ';' ."),
+        AddNonTerminal("PartialInst",     "IDENT ['(' ParamList ')'] '=' IDENT '(' ArgList ')' ';' ."),
+        AddNonTerminal("SystemLine",      "'system' [IDENT] {',' [IDENT]} ';' ."),
 
-        AddNonTerminal("Select",        "IDENT ':' Type ."),
+        AddNonTerminal("Select",          "IDENT ':' Type ."),
 
+        AddNonTerminal("Query",           "[QueryQuantifier] Expression [('-->') Expression] [Subjection] ."),
+        AddNonTerminal("QueryQuantifier", "'A[]' | 'E<>' | 'A<>' | 'E[]' ."),
+        AddNonTerminal("Subjection",      "'under' IDENT ."),
         //AddNonTerminal("", ""),
         //TODO: Queries
     )

@@ -1,5 +1,6 @@
 package mapping.base
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import tools.indexing.tree.Model
 import tools.parsing.SyntaxRegistry
@@ -8,9 +9,27 @@ import uppaal.messaging.UppaalMessageException
 import kotlin.reflect.KClass
 
 @Serializable
-data class Argument(var parameter: String, var value: String)
+data class Argument(
+    @SerialName("par")
+    var parameter: String,
+    @SerialName("v")
+    var value: String
+)
 @Serializable
-data class ProcessInfo(var name: String, var template: String, var arguments: List<Argument>)
+data class UppaalProcess(
+    @SerialName("name")
+    var name: String,
+    @SerialName("templ")
+    var template: String,
+    @SerialName("args")
+    var arguments: List<Argument>
+)
+
+data class UppaalSystem(
+    val processes: MutableList<UppaalProcess>,
+    val variables: MutableList<String>,
+    val clocks: MutableList<String>
+)
 
 abstract class SimulatorPhase : PhaseBase()
 {
@@ -21,7 +40,7 @@ abstract class SimulatorPhase : PhaseBase()
 
 
     /** This function allows you to edit the processes, variables, and clocks shown in the UPPAAL simulator. **/
-    abstract fun mapInitialSystem(processes: MutableList<ProcessInfo>, variables: MutableList<String>, clocks: MutableList<String>) // TODO: Merge all these into one "System"-class or something
+    abstract fun backMapInitialSystem(system: UppaalSystem)
 
 
     // TODO: Map step-command

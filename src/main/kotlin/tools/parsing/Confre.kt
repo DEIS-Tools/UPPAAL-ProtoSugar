@@ -228,7 +228,7 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
                     value += char
                     nextChar()
                 }
-                while (char != nullChar && terminals.any { it.matches(value + char) }) {
+                while (char != nullChar && (terminals.any { it.matches(value + char) } || terminals.filterIsInstance<AnonymousTerminal>().any { it.value.startsWith(value + char) })) {
                     value += char
                     nextChar()
                 }
@@ -331,7 +331,8 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
     }
 
     private fun matchChoice(choice: Choice, tokens: BufferedIterator<Token>): ParseTree {
-        val viableOptions = choice.options.filter { it.expects(tokens.current) != false }
+        val viableOptions = choice.options.filter { it.expects(tokens.current) == true } +
+                            choice.options.filter { it.expects(tokens.current) == null }
         val iterator = viableOptions.iterator()
         val exceptions = ArrayList<Exception>()
 

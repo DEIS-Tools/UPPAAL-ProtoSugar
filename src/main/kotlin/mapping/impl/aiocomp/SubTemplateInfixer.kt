@@ -15,7 +15,7 @@ class SubTemplateInfixer {
 
         @JvmStatic
         fun infix(info: TaTemplateInfo, index: AioCompModelIndex): Template {
-            val result = flatten(info, index, emptyList(), emptyList(), "")
+            val result = flatten(info, index, emptyList(), emptyList(), "", null)
             result.name.content = "_infixed_${info.trueName}"
             result.init = info.element.init?.clone()
             result.subtemplatereferences.clear()
@@ -29,9 +29,9 @@ class SubTemplateInfixer {
         }
 
         @JvmStatic
-        private fun flatten(currentInfo: TaTemplateInfo, index: AioCompModelIndex, declPrefix: List<String>, args: List<GuardedParseTree>, argsText: String): Template {
+        private fun flatten(currentInfo: TaTemplateInfo, index: AioCompModelIndex, declPrefix: List<String>, args: List<GuardedParseTree>, argsText: String, subTemplateUsage: SubTemplateUsage?): Template {
             val result = currentInfo.element.clone()
-            renameDeclsAndParams(index, currentInfo, result, declPrefix, args, argsText)
+            renameDeclsAndParams(index, currentInfo, result, declPrefix, args, argsText, subTemplateUsage)
 
             for ((subTemUsage, trueArgNode) in currentInfo.subTemplateInstances.entries.zip(result.subtemplatereferences.map { it.arguments }))
             {
@@ -39,10 +39,11 @@ class SubTemplateInfixer {
                 val trueArgs = trueArgNode?.content?.let { index.exprConfre.findAll(it).toList() } ?: emptyList()
                 merge(
                     result,
-                    flatten(subTemUsage.value.referencedInfo!!, index, declPrefix + AioCompModelIndex.trueName(subTemUsage.key.name!!.content), trueArgs, trueArgNode?.content ?: ""),
+                    flatten(subTemUsage.value.referencedInfo!!, index, declPrefix + AioCompModelIndex.trueName(subTemUsage.key.name!!.content), trueArgs, trueArgNode?.content ?: "", subTemUsage.value),
                     getBoundaryInfo(currentInfo, subTemUsage.key),
                     declPrefix,
-                    index
+                    index,
+                    subTemUsage.key.name!!.content
                 )
             }
 
@@ -57,7 +58,8 @@ class SubTemplateInfixer {
             result: Template,
             declPrefix: List<String>,
             args: List<GuardedParseTree>,
-            argsText: String
+            argsText: String,
+            subTemplateUsage: SubTemplateUsage?
         ) {
             val currentScope = index.model.find<TemplateDecl>(1) { it.element == currentInfo.element }
                 ?: throw Exception("Cannot find scope for template '${currentInfo.element.name.content}'")
@@ -68,6 +70,8 @@ class SubTemplateInfixer {
             val (params, nonParams) = currentScope.subDeclarations.filterIsInstance<FieldDecl>().partition { it is ParameterDecl }
             val namesToReplace = HashMap<String, String>()
             val namesToQualify = HashSet<String>()
+            if (subTemplateUsage != null)
+                subTemplateUsage.namesToReplace = namesToReplace
 
             // Rename/qualify parameters depending on the type of template
             for (param in params.withIndex()) {
@@ -181,10 +185,10 @@ class SubTemplateInfixer {
         }
 
         @JvmStatic
-        private fun merge(parent: Template, flatSub: Template, boundaryInfo: List<LinkedBoundary>, declPrefix: List<String>, index: AioCompModelIndex) {
+        private fun merge(parent: Template, flatSub: Template, boundaryInfo: List<LinkedBoundary>, declPrefix: List<String>, index: AioCompModelIndex, childInstanceName: String) {
             // TODO: Later -> Adjust coordinates of locations, transitions, etc
 
-            parent.declaration!!.content += "\n\n// '${qualify(flatSub.name.content, declPrefix, ".")}' (${AioCompModelIndex.trueName(flatSub.name.content)}) below\n" + flatSub.declaration!!.content
+            parent.declaration!!.content += "\n\n// '${qualify(childInstanceName, declPrefix, ".")}' (${AioCompModelIndex.trueName(flatSub.name.content)}) below\n" + flatSub.declaration!!.content
 
             // Merge edges between boundary points
             for (path in getPartialBoundaryPaths(parent, flatSub, boundaryInfo)) {
@@ -322,7 +326,7 @@ class SubTemplateInfixer {
 
 
         @JvmStatic
-        private fun qualify(baseName: String, prefixes: List<String>, sep: String = STD_SEP) =
+        fun qualify(baseName: String, prefixes: List<String>, sep: String = STD_SEP) =
             sep + (prefixes + baseName).joinToString(sep)
 
         @JvmStatic

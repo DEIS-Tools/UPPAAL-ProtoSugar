@@ -881,15 +881,15 @@ class SeCompMapper : Mapper() {
         val backMapOfBubbledUpProcesses: HashMap<String, String>,
         val subTemplateQueryMapInfo: HashMap<String, SubTemplateQueryMapInfo>
     ) : SimulatorPhase() {
-        override fun mapInitialSystem(processes: MutableList<ProcessInfo>, variables: MutableList<String>, clocks: MutableList<String>) {
+        override fun backMapInitialSystem(system: UppaalSystem) {
             val subTemInstanceCount = HashMap<Pair<String, String>, Int>() // Parent instance name, SubTemplate name -> Sub template count
             val instanceToName = HashMap<InstanceSummary, String>() // Parent
 
-            val finishedMappings = HashSet<ProcessInfo>()
-            while (finishedMappings.size != processes.size) {
+            val finishedMappings = HashSet<UppaalProcess>()
+            while (finishedMappings.size != system.processes.size) {
                 val nonPartialNextIndex = HashMap<String, Int>()
 
-                for (process in processes) {
+                for (process in system.processes) {
                     val currentTem = process.template
                     val currentIndex = nonPartialNextIndex.getOrPut(currentTem) { 0 }
                     nonPartialNextIndex[currentTem] = nonPartialNextIndex[currentTem]!! + 1
@@ -980,7 +980,7 @@ class SeCompMapper : Mapper() {
         private val queryExprConfre = Confre(ConfreHelper.expressionGrammar)
 
 
-        override fun mapQuery(queryRewriter: TextRewriter): String {
+        override fun mapQuery(queryRewriter: TextRewriter) {
             // This "instantiation" of baseNameToBubbledUpNames is delayed since 'backMapOfBubbledUpProcesses' is empty until this point
             if (baseNameToBubbledUpNames.isEmpty() && backMapOfBubbledUpProcesses.isNotEmpty())
                 for ((key, value) in backMapOfBubbledUpProcesses)
@@ -989,10 +989,8 @@ class SeCompMapper : Mapper() {
             try {
                 findDotExpressionContexts(queryRewriter.originalText)
                     .firstNotNullOfOrNull { mapContextWithSideEffects(queryRewriter, it) }
-                return queryRewriter.getRewrittenText()
             }
             catch (ex: Exception) {
-                queryRewriter.getRewrittenText() // Always rewrite query for back-mapping.
                 throw ex
             }
         }

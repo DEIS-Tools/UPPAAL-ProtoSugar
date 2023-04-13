@@ -9,6 +9,8 @@ import tools.indexing.tree.TemplateDecl
 import tools.parsing.Confre
 import tools.parsing.GuardedParseTree
 import tools.parsing.ParseTree
+import tools.restructuring.ActivationRule
+import tools.restructuring.TextRewriter
 import uppaal.UppaalPath
 import uppaal.messaging.UppaalMessage
 import uppaal.messaging.createUppaalError
@@ -16,17 +18,18 @@ import uppaal.model.*
 
 class AioCompMapper : Mapper() {
     override fun buildPhases(): Phases {
-        val index = AioCompModelIndex()
+        val modelIndex = AioCompModelIndex()
+        val systemIndex = AioCompSystemIndex(modelIndex)
 
         return Phases(
-            listOf(ModelIndexing(index), ReferenceValidation(index), InfixMapping(index)),
-            SimulatorMapping(index),
-            null
+            listOf(ModelIndexing(modelIndex), ReferenceValidation(modelIndex), InfixMapping(modelIndex)),
+            SimulatorMapping(modelIndex, systemIndex),
+            QueryMapping(modelIndex, systemIndex)
         )
     }
 
 
-    inner class ModelIndexing(val index: AioCompModelIndex) : ModelPhase() {
+    private inner class ModelIndexing(private val index: AioCompModelIndex) : ModelPhase() {
         val argListConfre by lazy { generateParser("ArgList") }
 
         override fun onConfigured() {
@@ -171,7 +174,7 @@ class AioCompMapper : Mapper() {
     }
 
 
-    inner class ReferenceValidation(val index: AioCompModelIndex) : ModelPhase() {
+    private inner class ReferenceValidation(private val index: AioCompModelIndex) : ModelPhase() {
         private val partialInstConfre by lazy { generateParser("PartialInst") }
         private val systemLineConfre by lazy { generateParser("SystemLine") }
 
@@ -387,7 +390,7 @@ class AioCompMapper : Mapper() {
     }
 
 
-    inner class InfixMapping(val index: AioCompModelIndex) : ModelPhase() {
+    private inner class InfixMapping(private val index: AioCompModelIndex) : ModelPhase() {
         private val partialInstConfre by lazy { generateParser("PartialInst") }
         private val systemLineConfre by lazy { generateParser("SystemLine") }
         private val trueToInfixedNames = HashMap<String, String>()
@@ -412,6 +415,7 @@ class AioCompMapper : Mapper() {
                 }
 
             // Clear non-native elements from (sub-)templates so that UPPAAL engine can still parse and error-check these.
+            var locationOffset = 0 // This is used to prevent "overlapping locations" warnings
             for (template in nta.templates) {
                 val idsOfRemovedElements = template.subtemplatereferences
                     .flatMap { subTemRef -> subTemRef.boundarypoints.map { it.id } }
@@ -419,14 +423,14 @@ class AioCompMapper : Mapper() {
 
                 // Replace non-native with native objects to preserve edges to UPPAAL engine can detect errors
                 for (id in idsOfRemovedElements)
-                    template.locations.add(Location(id, 0, 0, null, ArrayList(), null, null))
+                    template.locations.add(Location(id, locationOffset++ * 17, locationOffset++ * 17, null, ArrayList(), null, null))
                 template.subtemplatereferences.clear()
                 template.boundarypoints.clear()
 
                 // Make initial location so UPPAAL engine does not complain about that
                 if (template.init == null) {
                     val initId = "initID" + nta.templates.indexOf(template)
-                    template.locations.add(Location(initId, 0, 0, null, ArrayList(), null, null))
+                    template.locations.add(Location(initId, locationOffset++ * 17, locationOffset++ * 17, null, ArrayList(), null, null))
                     template.init = Init(initId)
                 }
             }
@@ -459,14 +463,73 @@ class AioCompMapper : Mapper() {
     }
 
 
-    inner class SimulatorMapping(val modelIndex: AioCompModelIndex) : SimulatorPhase() {
-        override fun mapInitialSystem(
-            processes: MutableList<ProcessInfo>,
-            variables: MutableList<String>,
-            clocks: MutableList<String>
-        ) {
-            TODO("Not yet implemented")
+    private inner class SimulatorMapping(private val modelIndex: AioCompModelIndex, private val systemIndex: AioCompSystemIndex) : SimulatorPhase() {
+        override fun backMapInitialSystem(system: UppaalSystem) {
+            for (process in system.processes) {
+                val templateInfo = systemIndex.tryRegister(process) ?: continue
+                process.template = templateInfo.trueName
+
+                // TODO: Insert sub-processes for every infixed process
+            }
+        }
+    }
+
+
+    private inner class QueryMapping(private val modelIndex: AioCompModelIndex, private val systemIndex: AioCompSystemIndex) : QueryPhase() {
+        val queryConfre by lazy { generateParser("Query") }
+        val expressionConfre by lazy { generateParser("Expression") }
+
+        override fun mapQuery(queryRewriter: TextRewriter) {
+            val parseTrees = queryConfre.findAll(queryRewriter.originalText).toList().ifEmpty {
+                expressionConfre.findAll(queryRewriter.originalText).toList()
+            }
+
+            for (tree in parseTrees) {
+                val extendedTerms = tree.findAllNonTerminals("ExtendedTerm", onlyLocal = false, onlyVisible = false)
+                for (term in extendedTerms.filter { !it[2]!!.isBlank })
+                    rewriteExtendedTerm(term, queryRewriter)
+            }
         }
 
+        private fun rewriteExtendedTerm(tree: GuardedParseTree, queryRewriter: TextRewriter) {
+            var currentInfo = systemIndex.baseProcessNameToTemplateInfo[tree[0]!!.toStringNotNull()] ?: return
+            var currentExtendedTerm = tree
+            val prefixes = mutableListOf<String>()
+
+            var currentSubTemUsage: SubTemplateUsage? = null
+            while (true) {
+                if (currentExtendedTerm[2]!![1]!!.isBlank)
+                    return
+                if (!currentExtendedTerm[2]!![1]!![0]!![1]!!.isBlank) // Cannot be followed by [] or ()
+                    break
+
+                val nextExtendedTerm = currentExtendedTerm[2]!![1]!![0]!!
+                val nextIdent = nextExtendedTerm[0]!!.toStringNotNull()
+                currentSubTemUsage = currentInfo.subTemplateInstances.entries
+                    .find { it.key.name!!.content == nextIdent }
+                    ?.value
+                    ?: break
+
+                currentInfo = currentSubTemUsage.referencedInfo!!
+                currentExtendedTerm = nextExtendedTerm
+                prefixes += nextIdent
+            }
+            currentExtendedTerm = currentExtendedTerm[2]!![1]!![0]!!
+
+            val startReplaceIndex = tree[2]!![1]!!.fullRange.first
+            val endReplaceIndex = currentExtendedTerm[0]!!.fullRange.last
+            val replaceRange = startReplaceIndex .. endReplaceIndex
+
+            val fieldIdent = currentExtendedTerm[0]!!.toStringNotNull()
+            val mappedFieldName = currentSubTemUsage?.namesToReplace?.get(fieldIdent)
+                ?: SubTemplateInfixer.qualify(fieldIdent, prefixes)
+
+            queryRewriter.replace(replaceRange, mappedFieldName)
+                .addBackMap()
+                .activateOn(ActivationRule.ERROR_CONTAINS_ACTIVATION)
+                .overrideErrorRange { tree.fullRange.first.. endReplaceIndex }
+                .overrideErrorMessage { it.replace(mappedFieldName, fieldIdent) }
+                .overrideErrorContext { it.replace(mappedFieldName, queryRewriter.originalText.substring(replaceRange)) }
+        }
     }
 }

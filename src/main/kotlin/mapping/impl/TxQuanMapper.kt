@@ -12,7 +12,7 @@ import tools.restructuring.TextRewriter
 class TxQuanMapper : Mapper() {
     override fun buildPhases() = Phases(listOf(), null, TxQuanQueryPhase())
 
-    private class TxQuanQueryPhase : QueryPhase()
+    private inner class TxQuanQueryPhase : QueryPhase()
     {
         private val aBox = "ALWAYS"
         private val eDiamond = "POSSIBLY"
@@ -41,12 +41,13 @@ class TxQuanMapper : Mapper() {
         """.trimIndent())
 
 
-        override fun mapQuery(queryRewriter: TextRewriter): String
-            = queryConfre.matchExact(queryRewriter.originalText)?.let { smartMap(it, queryRewriter) }
+        override fun mapQuery(queryRewriter: TextRewriter) {
+            queryConfre.matchExact(queryRewriter.originalText)?.let { smartMap(it, queryRewriter) }
                 ?: naiveMap(queryRewriter)
+        }
 
 
-        private fun smartMap(queryTree: ParseTree, queryRewriter: TextRewriter): String {
+        private fun smartMap(queryTree: ParseTree, queryRewriter: TextRewriter) {
             val textualQuantifierLeaves = queryTree
                 .postOrderWalk()
                 .filterIsInstance<Leaf>()
@@ -67,8 +68,6 @@ class TxQuanMapper : Mapper() {
                     queryRewriter.append(")")
                 }
             }
-
-            return queryRewriter.getRewrittenText()
         }
 
         private fun isTextualQuantifier(leaf: Leaf): Boolean {
@@ -77,7 +76,7 @@ class TxQuanMapper : Mapper() {
         }
 
 
-        private fun naiveMap(queryRewriter: TextRewriter): String {
+        private fun naiveMap(queryRewriter: TextRewriter) {
             val allMatches = textualQuantifierStrings.flatMap {
                 Regex("(^|[^_A-Za-z0-9])" + "(${it.key})" + "([^_A-Za-z0-9]|\$)")
                     .findAll(queryRewriter.originalText)
@@ -94,8 +93,6 @@ class TxQuanMapper : Mapper() {
                     .overrideErrorRange { toReplace.range }
                     .overrideErrorContext { originalVal }
             }
-
-            return queryRewriter.getRewrittenText()
         }
     }
 }

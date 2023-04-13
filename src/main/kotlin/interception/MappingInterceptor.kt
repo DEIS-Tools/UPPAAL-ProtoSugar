@@ -5,7 +5,8 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.*
 import mapping.Orchestrator
 import mapping.base.Argument
-import mapping.base.ProcessInfo
+import mapping.base.UppaalProcess
+import mapping.base.UppaalSystem
 import replaceValue
 import unescapeLinebreaks
 import uppaal.UppaalPath
@@ -34,15 +35,21 @@ class MappingInterceptor(
 
     private var latestModelErrors: List<UppaalMessage>? = null
 
-    private fun tryGetNextEngineInput(): JsonObject? {
-        return if (toEngineInput.available() != 0)
-            Json.decodeFromString<JsonObject>(getJsonString(toEngineInput, toEngineOutput) ?: return null)
+    data class Message(val json: JsonObject, val raw: String)
+
+    private fun tryGetNextEngineInput(): Message? {
+        return if (toEngineInput.available() != 0) {
+            val jsonString = getJsonString(toEngineInput, toEngineOutput) ?: return null
+            Message(Json.decodeFromString(jsonString), jsonString)
+        }
         else
             null
     }
-    private fun tryGetNextGuiInput(): JsonObject? {
-        return if (toGuiInput.available() != 0)
-            Json.decodeFromString<JsonObject>(getJsonString(toGuiInput, toGuiOutput) ?: return null)
+    private fun tryGetNextGuiInput(): Message? {
+        return if (toGuiInput.available() != 0) {
+            val jsonString = getJsonString(toGuiInput, toGuiOutput) ?: return null
+            Message(Json.decodeFromString(jsonString), jsonString)
+        }
         else
             null
     }
@@ -77,11 +84,11 @@ class MappingInterceptor(
 
     override fun fromGuiToEngine()
     {
-        val json = tryGetNextEngineInput() ?: return
+        val (json, raw) = tryGetNextEngineInput() ?: return
         when (json["cmd"]?.jsonPrimitive?.content) {
             "newXMLSystem3" -> interceptModelCommand(json)
             "modelCheck" -> interceptQueryCommand(json)
-            else -> toEngineOutput.writeAndFlush(json.toString())
+            else -> toEngineOutput.writeAndFlush(raw)
         }
 
         // TODO: Simulation commands
@@ -109,7 +116,7 @@ class MappingInterceptor(
             outputQueryCommandToEngine(orchestrator.mapQuery(json["args"]!!.jsonPrimitive.content))
         }
         catch (ex: UppaalMessageException) {
-            outputQueryErrorResponseToGui(ex.uppaalMessage)
+            outputQueryErrorResponseToGui(ex.uppaalMessage) // TODO: Are these errors actually back-mapped?
         }
         catch (ex: Exception) {
             ex.writeToFile(exceptionDumpFilePath)
@@ -121,20 +128,20 @@ class MappingInterceptor(
 
     override fun fromEngineToGui()
     {
-        val json = tryGetNextGuiInput() ?: return
+        val (json, raw) = tryGetNextGuiInput() ?: return
 
-        val resOk = json["res"].toString() == "ok"
-        val resErr = json["res"].toString() == "error"
+        val resOk = json["res"]?.jsonPrimitive?.content == "ok"
+        val resErr = json["res"]?.jsonPrimitive?.content == "error"
         val infoIsObj = json["info"] is JsonObject
         val errIsList = infoIsObj && json["info"]!!.jsonObject["errors"] is JsonArray
         val wrnIsList = infoIsObj && json["info"]!!.jsonObject["warnings"] is JsonArray
-        val infoStatusE = infoIsObj && json["info"]!!.jsonObject["status"]?.toString() == "E"
+        val infoStatusE = infoIsObj && json["info"]!!.jsonObject["status"]?.jsonPrimitive?.content == "E"
 
         when {
             resErr && wrnIsList && errIsList -> interceptModelErrorResponse(json)
             resOk && wrnIsList && !errIsList -> interceptModelSuccessResponse(json)
             resOk && !errIsList && infoStatusE -> interceptQueryErrorResponse(json)
-            else -> toGuiOutput.writeAndFlush(json.toString())
+            else -> toGuiOutput.writeAndFlush(raw)
 
             // TODO: Simulation responses
         }
@@ -165,15 +172,17 @@ class MappingInterceptor(
             if (latestModelErrors != null)
                 return outputModelErrorResponseToGui(orchestrator.backMapModelErrors(listOf(), latestModelErrors!!))
 
-            val processes = json["info"]!!.jsonObject["procs"]!!.jsonArray.map { it as JsonObject }.map { process -> ProcessInfo(
-                process["name"]!!.toString(),
-                process["templ"]!!.toString(),
-                process["args"]!!.jsonArray.map { it as JsonObject }.map { arg -> Argument(arg["par"]!!.toString(), arg["v"]!!.toString()) }
+            val processes = json["info"]!!.jsonObject["procs"]!!.jsonArray.map { it as JsonObject }.map { process -> UppaalProcess(
+                process["name"]!!.jsonPrimitive.content,
+                process["templ"]!!.jsonPrimitive.content,
+                process["args"]!!.jsonArray.map { it as JsonObject }.map { arg -> Argument(arg["par"]!!.jsonPrimitive.content, arg["v"]!!.jsonPrimitive.content) }
             )}.toMutableList()
-            val variables = json["info"]!!.jsonObject["vars"]!!.jsonArray.map { it.toString() }.toMutableList()
-            val clocks = json["info"]!!.jsonObject["clocks"]!!.jsonArray.map { it.toString() }.toMutableList()
+            val variables = json["info"]!!.jsonObject["vars"]!!.jsonArray.map { it.jsonPrimitive.content }.toMutableList()
+            val clocks = json["info"]!!.jsonObject["clocks"]!!.jsonArray.map { it.jsonPrimitive.content }.toMutableList()
 
-            orchestrator.backMapInitialSystem(processes, variables, clocks)
+            orchestrator.backMapInitialSystem(
+                UppaalSystem(processes, variables, clocks)
+            )
 
             toGuiOutput.write(
                 json.replaceValue(listOf("info", "procs"), Json.encodeToJsonElement(processes))
@@ -195,7 +204,7 @@ class MappingInterceptor(
     {
         try {
             val error = json["info"]!!.jsonObject["error"]!!.jsonObject
-            outputQueryErrorResponseToGui(error, orchestrator.backMapQueryError(UppaalMessage.fromJson(error)))
+            outputQueryErrorResponseToGui(json, orchestrator.backMapQueryError(UppaalMessage.fromJson(error)))
         }
         catch (ex: Exception) {
             ex.writeToFile(exceptionDumpFilePath)
@@ -254,6 +263,6 @@ class MappingInterceptor(
         }
     }.toString().unescapeLinebreaks())
     private fun outputQueryErrorResponseToGui(originalJson: JsonObject, mappedError: UppaalMessage)
-            = toGuiErrorOutput.writeAndFlush(
+            = toGuiOutput.writeAndFlush(
         originalJson.replaceValue(listOf("info", "error"), mappedError.toJson()).toString().unescapeLinebreaks())
 }

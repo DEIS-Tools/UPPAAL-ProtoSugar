@@ -75,9 +75,9 @@ class Orchestrator(private val mappers: List<Mapper>) {
 
     /** Back-map the "initial system state" returned from the engine to the "structure" of the original model. This is
      * necessary since processes/templates, variables, and clocks may have been rewritten. **/
-    fun backMapInitialSystem(processes: MutableList<ProcessInfo>, variables: MutableList<String>, clocks: MutableList<String>)
+    fun backMapInitialSystem(system: UppaalSystem)
         = (simulatorPhases?.reversed() ?: throw Exception("You must upload a model before you try to map errors"))
-            .forEach { it.mapInitialSystem(processes, variables, clocks) }
+            .forEach { it.backMapInitialSystem(system) }
 
     // TODO: New simulator mappings
 

@@ -4,10 +4,7 @@ import tools.parsing.Confre
 import tools.parsing.Node
 import tools.parsing.ParseTree
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.*
 import unJsonFy
 import uppaal.UppaalPath
 
@@ -101,15 +98,15 @@ class UppaalMessage {
 
         fun fromJson(json: JsonObject, severity: Severity = Severity.UNRECOVERABLE): UppaalMessage {
             return UppaalMessage(
-                json["path"]!!.toString(),
+                json["path"]!!.jsonPrimitive.content,
                 LineColumnRange(
                     json["begln"]!!.toString().toInt(),
                     json["begcol"]!!.toString().toInt(),
                     json["endln"]!!.toString().toInt(),
                     json["endcol"]!!.toString().toInt()
                 ),
-                json["path"]!!.toString(),
-                json["path"]!!.toString(),
+                json["msg"]!!.jsonPrimitive.content,
+                json["ctx"]!!.jsonPrimitive.content,
                 severity
             )
         }

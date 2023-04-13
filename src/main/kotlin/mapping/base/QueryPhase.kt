@@ -22,11 +22,12 @@ abstract class QueryPhase : PhaseBase()
     @Throws(UppaalMessageException::class)
     open fun mapQuery(query: String): String {
         rewriter = TextRewriter(query)
-        return mapQuery(rewriter)
+        mapQuery(rewriter)
+        return rewriter.getRewrittenText()
     }
 
     @Throws(UppaalMessageException::class)
-    abstract fun mapQuery(queryRewriter: TextRewriter): String
+    abstract fun mapQuery(queryRewriter: TextRewriter)
 
 
     override fun report(message: UppaalMessage) =

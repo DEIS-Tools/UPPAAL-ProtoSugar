@@ -70,6 +70,7 @@ class LocalBoundaryInfo(val entries: List<BoundaryPoint>, val exits: List<Bounda
 class SubTemplateUsage {
     var arguments: List<GuardedParseTree> = emptyList()
     var referencedInfo: TaTemplateInfo? = null
+    var namesToReplace = HashMap<String, String>()
 }
 
 class TaTemplateInfo(
@@ -94,7 +95,7 @@ class TaTemplateInfo(
     var hasRedefinition = false
     val canBeMapped: Boolean get() = hasPassedIndexing && hasPassedReferenceCheck && hasPassedCycleCheck && !hasRedefinition && subTemplateInstances.values.all { it.referencedInfo!!.canBeMapped }
 
-    lateinit var infixedName: String
+    var infixedName: String? = null
 }
 
 
