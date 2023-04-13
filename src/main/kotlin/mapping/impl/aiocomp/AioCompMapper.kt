@@ -1,8 +1,6 @@
 package mapping.impl.aiocomp
 
-import mapping.base.Mapper
-import mapping.base.ModelPhase
-import mapping.base.Phases
+import mapping.base.*
 import tools.indexing.text.EvaluableDecl
 import tools.indexing.text.ParameterDecl
 import tools.indexing.text.types.modifiers.ConstType
@@ -22,7 +20,7 @@ class AioCompMapper : Mapper() {
 
         return Phases(
             listOf(ModelIndexing(index), ReferenceValidation(index), InfixMapping(index)),
-            null,
+            SimulatorMapping(index),
             null
         )
     }
@@ -405,12 +403,33 @@ class AioCompMapper : Mapper() {
             for (rootInfo in index.rootSubTemUsers.values)
                 if (rootInfo.canBeMapped){
                     val newTemplate = SubTemplateInfixer.infix(rootInfo, index)
-                    nta.templates.add(newTemplate)
                     trueToInfixedNames[rootInfo.trueName] = newTemplate.name.content
+                    rootInfo.infixedName = newTemplate.name.content
+
+                    // Replace template with its infixed version while maintaining the original index (so errors are easier to back-map)
+                    nta.templates.add(nta.templates.indexOf(rootInfo.element), newTemplate)
+                    nta.templates.remove(rootInfo.element)
                 }
 
-            // TODO: What to do about sub-templates(-users)? Remove them (must map errors from infix to original) or keep them (must remove non-native concepts in a guaranteed, non-disruptive manner)
-            nta.templates.removeAll(index.taTemplates.values.filter { it.subTemOrUser }.map { it.element }) // Remove all for now
+            // Clear non-native elements from (sub-)templates so that UPPAAL engine can still parse and error-check these.
+            for (template in nta.templates) {
+                val idsOfRemovedElements = template.subtemplatereferences
+                    .flatMap { subTemRef -> subTemRef.boundarypoints.map { it.id } }
+                    .plus(template.boundarypoints.map { it.id })
+
+                // Replace non-native with native objects to preserve edges to UPPAAL engine can detect errors
+                for (id in idsOfRemovedElements)
+                    template.locations.add(Location(id, 0, 0, null, ArrayList(), null, null))
+                template.subtemplatereferences.clear()
+                template.boundarypoints.clear()
+
+                // Make initial location so UPPAAL engine does not complain about that
+                if (template.init == null) {
+                    val initId = "initID" + nta.templates.indexOf(template)
+                    template.locations.add(Location(initId, 0, 0, null, ArrayList(), null, null))
+                    template.init = Init(initId)
+                }
+            }
         }
 
         /** Replaces top-level sub-template user-names with "infix names" and make back-map to original system configuration **/
@@ -437,5 +456,17 @@ class AioCompMapper : Mapper() {
 
             system.content = rewriter.getRewrittenText()
         }
+    }
+
+
+    inner class SimulatorMapping(val modelIndex: AioCompModelIndex) : SimulatorPhase() {
+        override fun mapInitialSystem(
+            processes: MutableList<ProcessInfo>,
+            variables: MutableList<String>,
+            clocks: MutableList<String>
+        ) {
+            TODO("Not yet implemented")
+        }
+
     }
 }

@@ -93,6 +93,8 @@ class TaTemplateInfo(
     var hasPassedCycleCheck = true // Is set to false if necessary
     var hasRedefinition = false
     val canBeMapped: Boolean get() = hasPassedIndexing && hasPassedReferenceCheck && hasPassedCycleCheck && !hasRedefinition && subTemplateInstances.values.all { it.referencedInfo!!.canBeMapped }
+
+    lateinit var infixedName: String
 }
 
 

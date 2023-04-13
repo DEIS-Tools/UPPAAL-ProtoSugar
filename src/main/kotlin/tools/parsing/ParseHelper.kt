@@ -1,5 +1,7 @@
 package tools.parsing
 
+import java.util.*
+
 class ParseHelper {
     companion object {
         @JvmStatic
@@ -29,19 +31,51 @@ class ParseHelper {
 }
 
 class BufferedIterator<T>(private val iterator: Iterator<T>) {
-    private var current: T? = null
+    private var currentIndex = 0
+    private var snapshots = Stack<Int>()
+    private val buffer = mutableListOf<T?>(null)
 
-    fun current(): T = current ?: throw Exception("Iteration has not yet started. Call 'next()' first")
+    val current get() = buffer[currentIndex] ?: throw Exception("Iteration has not yet started. Call 'next()' first")
 
     fun hasNext(): Boolean = iterator.hasNext()
 
     fun next(): T {
-        current = iterator.next()
-        return current!!
+        if (snapshots.isNotEmpty()) {
+            currentIndex++
+            if (currentIndex == buffer.size)
+                buffer += iterator.next()
+        }
+        else
+            buffer[0] = iterator.next()
+
+        return buffer[currentIndex]!!
     }
 
     fun tryNext(): T? {
         return if (hasNext()) next()
             else null
+    }
+
+
+    fun setSnapshot() {
+        if (buffer[currentIndex] == null)
+            throw Exception("Iteration has not yet started. Call 'next()' first")
+        snapshots.push(currentIndex)
+    }
+
+    fun restoreSnapshot() {
+        currentIndex = 0
+    }
+
+    fun clearSnapshot() {
+        if (snapshots.isEmpty())
+            throw Exception("There are no active snapshots")
+
+        currentIndex = snapshots.pop()
+        if (snapshots.isEmpty()) {
+            val temp = buffer.last()
+            buffer.clear()
+            buffer += temp
+        }
     }
 }

@@ -224,10 +224,10 @@ class SyntaxRegistry {
         var goalInCurrentBlock = false
 
         while (true) {
-            val (index, char) = chars.current()
+            val (index, char) = chars.current
 
             // Reached goal
-            if (!goalInCurrentBlock && !char.isWhitespace() && currentPos == targetPos.current() && !targetPos.hasNext())
+            if (!goalInCurrentBlock && !char.isWhitespace() && currentPos == targetPos.current && !targetPos.hasNext())
                 if (!isChoiceInsert) // If inserting a choice, find the end of the currently selected block
                     return index
                 else if (!blockMarkers.containsKey(char)) // If not a block: exception // TODO: Maybe allow this later
@@ -264,7 +264,7 @@ class SyntaxRegistry {
 
             // Enter block
             else if (blockMarkers.containsKey(char)) {
-                if (currentPos == targetPos.current() && targetPos.hasNext()) {
+                if (currentPos == targetPos.current && targetPos.hasNext()) {
                     targetPos.next()
                     currentTargetDepth++
                     currentPos = 0
@@ -282,7 +282,7 @@ class SyntaxRegistry {
 
                 currentDepthAndBlock.pop()
                 if (isChoiceInsert && currentDepthAndBlock.size == currentTargetDepth)
-                    return if (currentPos == targetPos.current()) index // If this block is at the expected location
+                    return if (currentPos == targetPos.current) index // If this block is at the expected location
                            else null
 
                 if (currentDepthAndBlock.size < currentTargetDepth)

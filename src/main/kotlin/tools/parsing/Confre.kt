@@ -244,22 +244,22 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
 
         if (allowPartialMatch) {
             while (true) {
-                val accepts = nonTerminals[rootNonTerminal]!!.grammar.expects(tokens.current()) ?: throw Exception("") // TODO: Proper error message
+                val accepts = nonTerminals[rootNonTerminal]!!.grammar.expects(tokens.current) ?: throw Exception("") // TODO: Proper error message
                 if (accepts) {
                     val tree = tryMatch(tokens)
                     if (tree != null)
                         return tree
                 }
-                else if (tokens.current().terminal != eof)
+                else if (tokens.current.terminal != eof)
                     tokens.next()
 
-                if (tokens.current().terminal == eof)
+                if (tokens.current.terminal == eof)
                     return null
             }
         }
         else {
             val tree = tryMatch(tokens)
-            return if (tree != null && tokens.current().terminal == eof) tree
+            return if (tree != null && tokens.current.terminal == eof) tree
                    else null
         }
     }
@@ -292,16 +292,16 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
     }
 
     private fun matchTerminal(terminal: TerminalRef, tokens: BufferedIterator<Token>): ParseTree {
-        val accepts = terminal.expects(tokens.current())
+        val accepts = terminal.expects(tokens.current)
         if (accepts != true)
-            throw Exception("Tried to match token '${tokens.current()}' with terminal '${terminals[terminal.terminalId]}'")
-        val leaf = Leaf(terminal, tokens.current())
+            throw Exception("Tried to match token '${tokens.current}' with terminal '${terminals[terminal.terminalId]}'")
+        val leaf = Leaf(terminal, tokens.current)
         tokens.next()
         return leaf
     }
 
     private fun matchSequential(sequential: Sequential, tokens: BufferedIterator<Token>): ParseTree {
-        sequential.expects(tokens.current())
+        sequential.expects(tokens.current)
             ?: return Node(sequential, sequential.body.map { null })
 
         val children = ArrayList<ParseTree?>()
@@ -312,7 +312,7 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
     }
 
     private fun matchOptional(optional: Optional, tokens: BufferedIterator<Token>): ParseTree {
-        if (optional.expects(tokens.current()) != true)
+        if (optional.expects(tokens.current) != true)
             return Node(optional, listOf<ParseTree?>(null))
 
         val subTree = dispatch(optional.body, tokens)
@@ -324,22 +324,44 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
     private fun matchMultiple(multiple: Multiple, tokens: BufferedIterator<Token>): ParseTree {
         val children = ArrayList<ParseTree>()
 
-        while (multiple.expects(tokens.current()) == true)
+        while (multiple.expects(tokens.current) == true)
             children.add(dispatch(multiple.body, tokens))
 
         return Node(multiple, children)
     }
 
     private fun matchChoice(choice: Choice, tokens: BufferedIterator<Token>): ParseTree {
-        val accepts = choice.expects(tokens.current())
-        if (accepts == false)
-            throw Exception("Token '${tokens.current()}' could not satisfy any options in choice.")
+        val viableOptions = choice.options.filter { it.expects(tokens.current) != false }
+        val iterator = viableOptions.iterator()
+        val exceptions = ArrayList<Exception>()
 
-        val subTree = dispatch(choice.options.first { it.expects(tokens.current()) == accepts }, tokens)
-        val children = if (subTree.grammar is Sequential && subTree is Node) subTree.children
-                       else listOf(subTree)
+        if (viableOptions.size > 1)
+            tokens.setSnapshot()
+        while (iterator.hasNext()) {
+            try {
+                val subTree = dispatch(iterator.next(), tokens)
+                val children =
+                    if (subTree.grammar is Sequential && subTree is Node) subTree.children
+                    else listOf(subTree)
+                if (viableOptions.size > 1)
+                    tokens.clearSnapshot()
+                return Node(choice, children)
+            }
+            catch (ex: Exception) {
+                exceptions += ex
+                if (viableOptions.size > 1)
+                    tokens.restoreSnapshot()
+            }
+        }
+        if (viableOptions.size > 1)
+            tokens.clearSnapshot()
 
-        return Node(choice, children)
+        if (exceptions.isEmpty())
+            throw Exception("Token '${tokens.current}' could not satisfy any options in choice.")
+        else if (exceptions.size == 1)
+            throw exceptions[0]
+        else
+            throw Exception("Multiple viable choice-paths failed:\n\n" + exceptions.joinToString("\n\n") { it.toString() })
     }
 
 
