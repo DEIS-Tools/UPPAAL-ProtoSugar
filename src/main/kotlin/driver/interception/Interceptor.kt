@@ -1,10 +1,12 @@
-package interception
+package driver.interception
 
-abstract class Interceptor
+import driver.tools.CancellationToken
+
+abstract class Interceptor(private var cancellationToken: CancellationToken)
 {
     fun run(delay: Long = 25L)
     {
-        while (true) {
+        while (!cancellationToken.isCancellationRequested()) {
             fromGuiToEngine()
             Thread.sleep(delay)
 

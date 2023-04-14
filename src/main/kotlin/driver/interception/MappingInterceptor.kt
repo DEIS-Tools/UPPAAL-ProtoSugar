@@ -1,5 +1,7 @@
-package interception
+package driver.interception
 
+import driver.tools.CancellationToken
+import driver.tools.InterceptStreams
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.*
@@ -23,8 +25,9 @@ import kotlin.io.path.absolutePathString
 class MappingInterceptor(
     private val orchestrator: Orchestrator,
     private val exceptionDumpFilePath: String,
-    streams: InterceptStreams
-) : Interceptor()
+    streams: InterceptStreams,
+    cancellationToken: CancellationToken
+) : Interceptor(cancellationToken)
 {
     private val toEngineInput = BufferedInputStream(streams.inInput)
     private val toEngineOutput = streams.inOutput.bufferedWriter()
@@ -42,16 +45,14 @@ class MappingInterceptor(
             val jsonString = getJsonString(toEngineInput, toEngineOutput) ?: return null
             Message(Json.decodeFromString(jsonString), jsonString)
         }
-        else
-            null
+        else null
     }
     private fun tryGetNextGuiInput(): Message? {
         return if (toGuiInput.available() != 0) {
             val jsonString = getJsonString(toGuiInput, toGuiOutput) ?: return null
             Message(Json.decodeFromString(jsonString), jsonString)
         }
-        else
-            null
+        else null
     }
     private fun getJsonString(input: InputStream, output: BufferedWriter): String? {
         input.mark(1)
@@ -106,7 +107,7 @@ class MappingInterceptor(
         catch (ex: Exception) {
             orchestrator.clearCache()
             ex.writeToFile(exceptionDumpFilePath)
-            outputMessageAsErrorToGui(
+            outputStringAsErrorToGui(
                 "The uploaded model caused an exception. See details: '${Path(exceptionDumpFilePath).absolutePathString()}'", useModelErrorResponse = true)
         }
     }
@@ -120,7 +121,7 @@ class MappingInterceptor(
         }
         catch (ex: Exception) {
             ex.writeToFile(exceptionDumpFilePath)
-            outputMessageAsErrorToGui(
+            outputStringAsErrorToGui(
                 "The submitted query caused an exception. See details: '${Path(exceptionDumpFilePath).absolutePathString()}'", useModelErrorResponse = false)
         }
     }
@@ -159,7 +160,7 @@ class MappingInterceptor(
         }
         catch (ex: Exception) {
             ex.writeToFile(exceptionDumpFilePath)
-            outputMessageAsErrorToGui(
+            outputStringAsErrorToGui(
                 "An error response to an uploaded model caused an exception. See details: '${Path(exceptionDumpFilePath).absolutePathString()}'", useModelErrorResponse = true)
         }
         finally {
@@ -193,7 +194,7 @@ class MappingInterceptor(
         }
         catch (ex: Exception) {
             ex.writeToFile(exceptionDumpFilePath)
-            outputMessageAsErrorToGui(
+            outputStringAsErrorToGui(
                 "Engine model success response lead to exception. See details: '${Path(exceptionDumpFilePath).absolutePathString()}'", useModelErrorResponse = true)
         }
         finally {
@@ -208,7 +209,7 @@ class MappingInterceptor(
         }
         catch (ex: Exception) {
             ex.writeToFile(exceptionDumpFilePath)
-            outputMessageAsErrorToGui(
+            outputStringAsErrorToGui(
                 "Engine query error response lead to exception. See details: '${Path(exceptionDumpFilePath).absolutePathString()}'", useModelErrorResponse = false)
         }
     }
@@ -221,7 +222,7 @@ class MappingInterceptor(
     }
 
 
-    private fun outputMessageAsErrorToGui(message: String, useModelErrorResponse: Boolean) {
+    private fun outputStringAsErrorToGui(message: String, useModelErrorResponse: Boolean) {
         val error = createUppaalError(UppaalPath(), message, true)
         if (useModelErrorResponse)
             outputModelErrorResponseToGui(listOf(error))

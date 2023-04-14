@@ -1,6 +1,11 @@
 package mapping
 
 import mapping.base.*
+import mapping.impl.AutoArrMapper
+import mapping.impl.PaChaMapper
+import mapping.impl.SeCompMapper
+import mapping.impl.TxQuanMapper
+import mapping.impl.aiocomp.AioCompMapper
 import tools.indexing.IndexingModelWalker
 import tools.parsing.SyntaxRegistry
 import uppaal.messaging.UppaalMessage
@@ -11,14 +16,26 @@ import java.lang.Exception
 import kotlin.jvm.Throws
 
 // Elements in the "XML-tree" are visited in pre-order.
-class Orchestrator(private val mappers: List<Mapper>) {
-    private val syntaxRegistry = SyntaxRegistry()
+class Orchestrator(activeMappers: List<String>) {
+    companion object {
+        val availableMappers = mapOf(
+            Pair("PaCha") { PaChaMapper() },
+            Pair("AutoArr") { AutoArrMapper() },
+            Pair("TxQuan") { TxQuanMapper() },
+            Pair("SeComp") { SeCompMapper() },
+            Pair("AioComp") { AioCompMapper() }
+        )
+    }
+
+    private val mappers = activeMappers.map { availableMappers[it]?.invoke() ?: throw Exception("Invalid mapper name '$it'") }
+    val numberOfMappers = mappers.size
 
     private var modelPhases: ArrayList<ModelPhase>? = null
     private var simulatorPhases: List<SimulatorPhase>? = null
     private var queryPhases: List<QueryPhase>? = null
 
-    val numberOfMappers = mappers.size
+    private val syntaxRegistry = SyntaxRegistry()
+
 
     init {
         for (mapper in mappers)

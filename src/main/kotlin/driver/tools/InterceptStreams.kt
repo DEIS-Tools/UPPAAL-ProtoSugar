@@ -1,7 +1,5 @@
-package interception
+package driver.tools
 
-import java.io.BufferedReader
-import java.io.BufferedWriter
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.PipedInputStream
@@ -17,13 +15,10 @@ class InterceptStreams private constructor(
 ) {
     companion object {
         @JvmStatic
-        fun fromProcess(process: Process, levels: Int = 1): List<InterceptStreams> {
+        fun from(guiStreams: GuiStreams, process: Process, levels: Int = 1): List<InterceptStreams> {
             val streams = ArrayList<InterceptStreams>()
 
-            var inInput = System.`in`
-            var outOutput: OutputStream = System.out
-            var errOutput: OutputStream = System.err
-
+            var (inInput, outOutput, errOutput) = guiStreams
             for (i in 1 until levels) {
                 val inOutput = PipedOutputStream()
                 val outInput = PipedInputStream()
@@ -31,10 +26,10 @@ class InterceptStreams private constructor(
 
                 streams.add(
                     InterceptStreams(
-                    inInput, inOutput,
-                    outInput, outOutput,
-                    errInput, errOutput
-                )
+                        inInput, inOutput,
+                        outInput, outOutput,
+                        errInput, errOutput
+                    )
                 )
 
                 inInput = PipedInputStream(inOutput)
@@ -44,10 +39,10 @@ class InterceptStreams private constructor(
 
             streams.add(
                 InterceptStreams(
-                inInput, process.outputStream,
-                process.inputStream, outOutput,
-                process.errorStream, errOutput
-            )
+                    inInput, process.outputStream,
+                    process.inputStream, outOutput,
+                    process.errorStream, errOutput
+                )
             )
 
             return streams

@@ -1,5 +1,7 @@
-package interception
+package driver.interception
 
+import driver.tools.CancellationToken
+import driver.tools.InterceptStreams
 import java.io.BufferedWriter
 import java.io.File
 
@@ -7,8 +9,9 @@ class DataDumpInterceptor(
     streams: InterceptStreams,
     inputStreamFile: String,
     outputStreamFile: String,
-    errorStreamFile: String
-) : Interceptor()
+    errorStreamFile: String,
+    cancellationToken: CancellationToken
+) : Interceptor(cancellationToken)
 {
     private val inInput = streams.inInput.bufferedReader()
     private val inOutput = streams.inOutput.bufferedWriter()

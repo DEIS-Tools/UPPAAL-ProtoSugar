@@ -34,8 +34,10 @@ data class LineColumnRange(var beginLine: Int, var beginColumn: Int, var endLine
         // A last resort to not fail.
         if (startIndex != -1)
             return IntRange(startIndex, currentIndex)
+        if (text == "")
+            return IntRange.EMPTY
 
-        throw Exception("Could not convert $this to IntRange on text:\n$text")
+        return IntRange(text.indices.last, text.indices.last)
     }
 
     companion object {
