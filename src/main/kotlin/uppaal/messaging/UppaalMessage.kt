@@ -10,15 +10,15 @@ import uppaal.UppaalPath
 
 /** H **/
 enum class Severity {
-    /** This error is in fact just a warning. **/
+    /** Just a warning. **/
     WARNING,
 
     /** This error does not hinder the mapper in writing valid UPPAAL code.
      * The mapped model is sent to the engine, but even if UPPAAL detects no errors, this error will still be output. **/
     NON_BREAKING,
 
-    /** This error makes the mapper unable to produce valid UPPAAL code. This and all previously errors are output
-     * immediately after the mapper returns. The model is not sent to the engine. The errors return immediately. **/
+    /** This error makes the mapper unable to produce valid UPPAAL code. This and all previously reported errors are
+     * output immediately after the mapper returns. The model is not sent to the engine. **/
     UNRECOVERABLE
 }
 
@@ -36,11 +36,8 @@ class UppaalMessage {
 
     var phaseIndex: Int = Int.MAX_VALUE
 
-    constructor(path: UppaalPath, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean)
-        : this(path.toString(), range, message, context, isUnrecoverable)
-
-    constructor(path: String, range: LineColumnRange, message: String, context: String, isUnrecoverable: Boolean)
-        : this(path, range, message, context, if (isUnrecoverable) Severity.UNRECOVERABLE else Severity.NON_BREAKING)
+    constructor(path: UppaalPath, range: LineColumnRange, message: String, context: String, severity: Severity)
+        : this(path.toString(), range, message, context, severity)
 
     constructor(path: String, range: LineColumnRange, message: String, context: String, severity: Severity) {
         this.path = path
@@ -64,38 +61,6 @@ class UppaalMessage {
     }
 
     companion object {
-        @JvmStatic
-        private val errorGrammar = Confre("""
-            INT = ([1-9][0-9]*)|0*
-            STRING = "((\\.|[^\\"\n])*(")?)?
-            
-            Error :== '{' '"path"'   ':' STRING ','
-                          '"begln"'  ':' INT    ','
-                          '"begcol"' ':' INT    ','
-                          '"endln"'  ':' INT    ','
-                          '"endcol"' ':' INT    ','
-                          '"msg"'    ':' STRING ','
-                          '"ctx"'    ':' STRING
-                      '}' .
-        """.trimIndent())
-
-        @JvmStatic
-        fun fromJson(json: String, isUnrecoverable: Boolean = true): UppaalMessage {
-            val errorTree = (errorGrammar.matchExact(json) as? Node) ?: throw Exception("Could not parse UppaalError from JSON: $json")
-            return UppaalMessage(
-                errorTree.children[3]!!.toString().drop(1).dropLast(1).unJsonFy(),
-                LineColumnRange(
-                    errorTree.children[7]!!.toString().toInt(),
-                    errorTree.children[11]!!.toString().toInt(),
-                    errorTree.children[15]!!.toString().toInt(),
-                    errorTree.children[19]!!.toString().toInt()
-                ),
-                errorTree.children[23]!!.toString().drop(1).dropLast(1).unJsonFy(),
-                errorTree.children[27]!!.toString().drop(1).dropLast(1).unJsonFy(),
-                isUnrecoverable
-            )
-        }
-
         fun fromJson(json: JsonObject, severity: Severity = Severity.UNRECOVERABLE): UppaalMessage {
             return UppaalMessage(
                 json["path"]!!.jsonPrimitive.content,
@@ -114,6 +79,10 @@ class UppaalMessage {
 }
 
 
+fun createUppaalWarning(path: UppaalPath, message: String): UppaalMessage
+    = createUppaalMessage(path, "", IntRange.EMPTY, message, "", Severity.WARNING)
+
+
 fun createUppaalError(path: UppaalPath, message: String, isUnrecoverable: Boolean = false): UppaalMessage
     = createUppaalError(path, "", IntRange.EMPTY, message, "", isUnrecoverable)
 
@@ -126,9 +95,13 @@ fun createUppaalError(path: UppaalPath, code: String, node: ParseTree, message: 
 fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, isUnrecoverable: Boolean = false): UppaalMessage
     = createUppaalError(path, code, range, message, "", isUnrecoverable)
 
-fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, context: String, isUnrecoverable: Boolean = false): UppaalMessage {
+fun createUppaalError(path: UppaalPath, code: String, range: IntRange, message: String, context: String, isUnrecoverable: Boolean = false): UppaalMessage
+    = createUppaalMessage(path, code, range, message, context, if (isUnrecoverable) Severity.UNRECOVERABLE else Severity.NON_BREAKING)
+
+
+fun createUppaalMessage(path: UppaalPath, code: String, range: IntRange, message: String, context: String, severity: Severity): UppaalMessage {
     val linesAndColumns =
         if (range != IntRange.EMPTY) LineColumnRange.fromIntRange(code, range)
         else LineColumnRange(1,1,1,1)
-    return UppaalMessage(path, linesAndColumns, message, context, isUnrecoverable = isUnrecoverable)
+    return UppaalMessage(path, linesAndColumns, message, context, severity)
 }

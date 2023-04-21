@@ -14,6 +14,7 @@ import tools.restructuring.TextRewriter
 import uppaal.UppaalPath
 import uppaal.messaging.UppaalMessage
 import uppaal.messaging.createUppaalError
+import uppaal.messaging.createUppaalWarning
 import uppaal.model.*
 
 class AioCompMapper : Mapper() {
@@ -44,6 +45,7 @@ class AioCompMapper : Mapper() {
         private fun indexTemplate(path: UppaalPath, template: Template) {
             val info = index.register(template, path)
             val errors = ArrayList<UppaalMessage>()
+            val warnings = ArrayList<UppaalMessage>()
 
             if (info.isRedefinition)
                 errors.add(redefinitionError(path, info))
@@ -96,7 +98,11 @@ class AioCompMapper : Mapper() {
                 if (ref.subtemplatename?.content.isNullOrBlank())
                     errors.add(blankSubTemplateNameInSubTemplateReferenceError(path + refElem))
 
-                // TODO: Warning -> No entry-boundarypoint on sub-template reference
+                if (ref.boundarypoints.any { it.kind.isBlank() })
+                    errors.add(hasBlankBoundaryPointError(path + refElem, ref))
+
+                if (ref.boundarypoints.none { it.kind == BoundaryPoint.ENTRY })
+                    warnings.add(noEntryBoundaryPointWarning(path + refElem, ref))
 
                 val argsTree = argListConfre.matchExact(ref.arguments?.content ?: continue)
                 if (argsTree == null) {
@@ -114,6 +120,7 @@ class AioCompMapper : Mapper() {
 
             info.hasPassedIndexing = errors.isEmpty()
             reportAll(errors)
+            reportAll(warnings)
         }
 
         private fun extractExpressions(argsTree: GuardedParseTree): List<GuardedParseTree>? {
@@ -136,6 +143,22 @@ class AioCompMapper : Mapper() {
 
         private fun blankSubTemplateNameInSubTemplateReferenceError(path: UppaalPath): UppaalMessage =
             createUppaalError(path, "The 'sub-template name' in a sub-template reference cannot be blank", isUnrecoverable = true)
+
+        private fun hasBlankBoundaryPointError(path: UppaalPath, subTemplateReference: SubTemplateReference): UppaalMessage {
+            val name = subTemplateReference.name?.content
+            return if (name?.isNotBlank() == true)
+                createUppaalError(path, "The sub-template reference '$name' has blank boundary points", isUnrecoverable = true)
+            else
+                createUppaalError(path, "Sub-template reference has blank boundary points", isUnrecoverable = true)
+        }
+
+        private fun noEntryBoundaryPointWarning(path: UppaalPath, subTemplateReference: SubTemplateReference): UppaalMessage {
+            val name = subTemplateReference.name?.content
+            return if (name?.isNotBlank() == true)
+                createUppaalWarning(path, "The sub-template reference '$name' has no blank boundary point")
+            else
+                createUppaalWarning(path, "Sub-template reference has blank boundary points")
+        }
 
         private fun redefinitionError(path: UppaalPath, info: TaTemplateInfo): UppaalMessage =
             createUppaalError(path, "Redeclaration of a (sub-)template name: '${info.element.name.content}'", isUnrecoverable = true)

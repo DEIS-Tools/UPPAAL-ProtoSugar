@@ -15,11 +15,9 @@ import kotlin.io.path.pathString
 import kotlin.system.exitProcess
 
 
-class Driver(activeMappers: List<String>) {
-    private val orchestrator = Orchestrator(activeMappers)
-
-
+class Driver(private val activeMappers: List<String>) {
     fun runMapper(input: InputStream, output: BufferedWriter) {
+        val orchestrator = Orchestrator(activeMappers)
         val result = orchestrator.mapModel(input)
         if (result.second.isNotEmpty())
             output.write("There were errors:\n" + result.second.joinToString("\n"))
@@ -35,6 +33,7 @@ class Driver(activeMappers: List<String>) {
 
     @Suppress("DeferredResultUnused")
     fun runSocketServer(serverCmd: String, port: Int, exceptionDumpDir: String) {
+        Orchestrator(activeMappers) // Test that the mappers are valid
         println("Listening on port '$port'")
         runBlocking {
             async(Dispatchers.IO) {
@@ -72,13 +71,14 @@ class Driver(activeMappers: List<String>) {
             cancellationToken.requestCancellation()
         }
 
+        val orchestrator = Orchestrator(activeMappers)
         val doMapping = orchestrator.numberOfMappers > 0
         val doStreamDump = streamDumpDir != null
 
         runBlocking {
             val interceptors = when {
-                doMapping && doStreamDump -> runMapAndDump(guiStreams, serverProcess, exceptionDumpDir, streamDumpDir!!, cancellationToken)
-                doMapping                 -> runMapNoDump(guiStreams, serverProcess, exceptionDumpDir, cancellationToken)
+                doMapping && doStreamDump -> runMapAndDump(guiStreams, serverProcess, exceptionDumpDir, streamDumpDir!!, cancellationToken, orchestrator)
+                doMapping                 -> runMapNoDump(guiStreams, serverProcess, exceptionDumpDir, cancellationToken, orchestrator)
                 doStreamDump              -> runDumpNoMap(guiStreams, serverProcess, streamDumpDir, cancellationToken)
                 else                      -> runNative(guiStreams, serverProcess, cancellationToken)
             }
@@ -91,7 +91,8 @@ class Driver(activeMappers: List<String>) {
         serverProcess: Process,
         exceptionDumpDir: String,
         streamDumpDir: String,
-        cancellationToken: CancellationToken
+        cancellationToken: CancellationToken,
+        orchestrator: Orchestrator
     ): List<Deferred<Unit>> {
         val streamList = InterceptStreams.from(guiStreams, serverProcess, 3)
         return listOf(
@@ -121,7 +122,8 @@ class Driver(activeMappers: List<String>) {
         guiStreams: GuiStreams,
         serverProcess: Process,
         exceptionDumpDir: String,
-        cancellationToken: CancellationToken
+        cancellationToken: CancellationToken,
+        orchestrator: Orchestrator
     ): List<Deferred<Unit>> {
         val interceptStreams = InterceptStreams.from(guiStreams, serverProcess).single()
         return listOf(

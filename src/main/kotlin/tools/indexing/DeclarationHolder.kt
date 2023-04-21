@@ -3,8 +3,8 @@ package tools.indexing
 import tools.indexing.text.FieldDecl
 
 abstract class DeclarationHolder {
-    private val _subDeclarations = linkedSetOf<DeclarationBase>() // Order of elements affects visibility
-    val subDeclarations: Set<DeclarationBase> get() = _subDeclarations
+    private val _subDeclarations = mutableListOf<DeclarationBase>() // Order of elements affects visibility
+    val subDeclarations: List<DeclarationBase> get() = _subDeclarations
 
     fun add(element: DeclarationBase) {
         _subDeclarations.add(element)
@@ -14,10 +14,7 @@ abstract class DeclarationHolder {
         }
     }
 
-    // TODO: Semantics... "Resolve = go up" and "Find = go down" ????
 
-
-    // TODO: May require different resolve-strategies
     /** Find the declaration that "first" matches the given identifier which is a direct child of this element or any of its ancestors. **/
     inline fun <reified T : FieldDecl> resolveField(identifier: String, relativeTo: DeclarationBase? = null): T?
             = resolveField(identifier, relativeTo, T::class.java)
@@ -33,11 +30,10 @@ abstract class DeclarationHolder {
         return subDeclarations.asSequence()
             .takeWhile { it != relativeTo }
             .filterIsInstance(targetClass)
-            .firstOrNull { it.identifier == identifier }
+            .lastOrNull { it.identifier == identifier }
     }
 
 
-    // TODO: May require different-search strategies (depth first? breadth first? Something else? This might not even make sense to allow in the first place)
     inline fun <reified T : DeclarationHolder> find(maxDepth: Int, noinline predicate: ((T) -> Boolean)?): T?
         = findAll(predicate, T::class.java, maxDepth).firstOrNull()
     inline fun <reified T : DeclarationHolder> findAll(maxDepth: Int, noinline predicate: ((T) -> Boolean)? = null): Sequence<T>
