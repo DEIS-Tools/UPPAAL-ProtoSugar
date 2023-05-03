@@ -5,12 +5,6 @@ import tools.restructuring.TextRewriter
 import java.io.BufferedWriter
 import java.io.File
 
-/** Escape all letters in terms of Json. (Does not handle syntax errors.) **/
-fun String.jsonFy() = this.replace("\\", "\\\\").replace("\"", "\\\"")
-
-/** Un-escape all characters in terms of Json. (Does not handle syntax errors.) **/
-fun String.unJsonFy() = this.replace("\\\"", "\"").replace("\\\\", "\\")
-
 /** If 'this' does not start with 'prefix', return 'prefix + this'. Otherwise, return 'this' **/
 fun String.ensureStartsWith(prefix: String) =
     if (this.startsWith(prefix)) this
@@ -31,8 +25,7 @@ fun IntRange.overlaps(other: IntRange) = this.first <= other.last && other.first
 
 
 /** Get the product of all number in a list of integers. **/
-fun List<Int>.product(): Int
-    = this.fold(1) { acc, value -> acc * value }
+fun List<Int>.product() = this.fold(1) { acc, value -> acc * value }
 
 
 /** Works similar to 'String.joinToString()'. It takes an insertion-'location', a list of string 'elements' to insert,
@@ -52,7 +45,7 @@ fun TextRewriter.joinInsert(location: Int, elements: List<String>, separator: St
 
 /** Create and add a new rewriter to a map of rewriters with "path-keys". Throws if path already has a rewriter. **/
 fun MutableMap<String, TextRewriter>.createOrGetRewriter(path: UppaalPath, originalText: String): TextRewriter
-    = this.getOrPut(path.toString()) { TextRewriter(originalText) }
+        = this.getOrPut(path.toString()) { TextRewriter(originalText) }
 
 
 /** Print exception to a file. **/
@@ -80,3 +73,7 @@ fun String.unescapeLinebreaks(): String =
     else this.replace("\\n", "\n")
         .replace("\\r", "\r")
 
+
+/** Determine whether a string follows the official regex for identifiers **/
+private val uppaalIdentRegex = Regex("""[a-zA-Z_][a-zA-Z0-9_]*""")
+fun String.isValidUppaalIdent() = uppaalIdentRegex.matches(this)

@@ -158,19 +158,25 @@ class AioCompModelIndex {
     }
 
     private fun getCircularReferences(current: TaTemplateInfo, path: MutableList<TaTemplateInfo>):
-            Sequence<Pair<UppaalPath, LinkedHashSet<TaTemplateInfo>>> = sequence {
-        for (usage in current.subTemplateInstances)
-            if (usage.value.referencedInfo!! in path) {
-                val index = current.element.subtemplatereferences.indexOf(usage.key)
-                val uppaalPath = current.path.extend(usage.key, index)
-                val cycle = linkedSetOf(*path.dropWhile { it != usage.value.referencedInfo }.toTypedArray()) // Must use array and "unpack" to get correct return types
-                yield(Pair(uppaalPath, cycle))
-            }
-            else {
-                path.add(usage.value.referencedInfo!!)
-                yieldAll(getCircularReferences(usage.value.referencedInfo!!, path))
-                path.removeLast()
-            }
+            Sequence<Pair<UppaalPath, LinkedHashSet<TaTemplateInfo>>>
+    {
+        if (!current.hasPassedReferenceCheck)
+            return emptySequence()
+
+        return sequence {
+            for (usage in current.subTemplateInstances)
+                if (usage.value.referencedInfo!! in path) {
+                    val index = current.element.subtemplatereferences.indexOf(usage.key)
+                    val uppaalPath = current.path.extend(usage.key, index)
+                    val cycle = linkedSetOf(*path.dropWhile { it != usage.value.referencedInfo }.toTypedArray()) // Must use array and "unpack" to get correct return types
+                    yield(Pair(uppaalPath, cycle))
+                }
+                else {
+                    path.add(usage.value.referencedInfo!!)
+                    yieldAll(getCircularReferences(usage.value.referencedInfo!!, path))
+                    path.removeLast()
+                }
+        }
     }
 
 
@@ -201,6 +207,8 @@ class AioCompModelIndex {
 
     private fun getBoundaryPaths(path: List<BoundaryPathNode>, referenceChain: List<SubTemplateReference>): Sequence<BoundaryPath> {
         val current = path.last()
+        if (!current.templateInfo.hasPassedReferenceCheck)
+            return emptySequence()
 
         // TODO: Ignore complete paths since they are not used for merging (which is done layer-by-layer)
         if (current.edgeInfo.targetType == EndType.NORMAL)

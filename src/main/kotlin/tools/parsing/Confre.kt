@@ -23,7 +23,8 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
     private val eof: NamedTerminal = NamedTerminal(-1, "EOF", Regex(nullChar.toString()))
     private val terminals: MutableList<Terminal> = ArrayList()
     private val nonTerminals: MutableMap<String , NonTerminal> = HashMap()
-    private var rootNonTerminal: String
+    var rootNonTerminal: String
+        private set
 
     private val stringPattern = Regex("""'((?>(?>\\[\\'])|[^'\s\\])*)'""")
 
@@ -250,11 +251,11 @@ class Confre(val grammar: String, rootNonTerminalOverride: String? = null) {
                     if (tree != null)
                         return tree
                 }
-                else if (tokens.current.terminal != eof)
-                    tokens.next()
 
                 if (tokens.current.terminal == eof)
                     return null
+                else
+                    tokens.next()
             }
         }
         else {

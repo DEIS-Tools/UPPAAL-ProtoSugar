@@ -1,5 +1,6 @@
 package mapping.impl.aiocomp
 
+import isValidUppaalIdent
 import mapping.base.*
 import tools.indexing.text.EvaluableDecl
 import tools.indexing.text.ParameterDecl
@@ -92,11 +93,14 @@ class AioCompMapper : Mapper() {
                 val ref = refElem.value
                 info.subTemplateInstances[ref] = SubTemplateUsage()
 
-                if (ref.name?.content.isNullOrBlank())
+                val subTemRefName = ref.name?.content
+                if (subTemRefName.isNullOrBlank())
                     errors.add(blankSubTemplateReferenceNameError(path + refElem)) // TODO: Allow blank sub-template reference names
+                else if (!subTemRefName.isValidUppaalIdent())
+                    errors.add(invalidIdentifierError(path + refElem + ref.name!!, subTemRefName))
 
                 if (ref.subtemplatename?.content.isNullOrBlank())
-                    errors.add(blankSubTemplateNameInSubTemplateReferenceError(path + refElem))
+                    errors.add(blankSubTemplateNameInSubTemplateReferenceError(path + refElem, ref.subtemplatename))
 
                 if (ref.boundarypoints.any { it.kind.isBlank() })
                     errors.add(hasBlankBoundaryPointError(path + refElem, ref))
@@ -141,8 +145,15 @@ class AioCompMapper : Mapper() {
         private fun blankSubTemplateReferenceNameError(path: UppaalPath): UppaalMessage =
             createUppaalError(path, "The name of a sub-template reference cannot be blank (yet; feature pending)", isUnrecoverable = true)
 
-        private fun blankSubTemplateNameInSubTemplateReferenceError(path: UppaalPath): UppaalMessage =
-            createUppaalError(path, "The 'sub-template name' in a sub-template reference cannot be blank", isUnrecoverable = true)
+        private fun invalidIdentifierError(path: UppaalPath, name: String): UppaalMessage =
+            createUppaalError(path, name, "Sub-template reference has invalid name", isUnrecoverable = true)
+
+        private fun blankSubTemplateNameInSubTemplateReferenceError(path: UppaalPath, subTemplateName: SubTemplateName?): UppaalMessage {
+            val truePath =
+                if (subTemplateName == null) path
+                else path.extend(subTemplateName)
+            return createUppaalError(truePath, "The 'sub-template name' in a sub-template reference cannot be blank", isUnrecoverable = true)
+        }
 
         private fun hasBlankBoundaryPointError(path: UppaalPath, subTemplateReference: SubTemplateReference): UppaalMessage {
             val name = subTemplateReference.name?.content
@@ -355,9 +366,9 @@ class AioCompMapper : Mapper() {
 
         private fun invalidReferenceError(path: UppaalPath, name: String, subTemName: String?): UppaalMessage =
             if (subTemName == null)
-                createUppaalError(path, "The name '$name' does not reference a sub-template", isUnrecoverable = true)
+                createUppaalError(path, name, "The name '$name' does not reference a sub-template", isUnrecoverable = true)
             else
-                createUppaalError(path, "The name '$name' does not reference a boundary point on sub-template '$subTemName'", isUnrecoverable = true)
+                createUppaalError(path, name, "The name '$name' does not reference a boundary point on sub-template '$subTemName'", isUnrecoverable = true)
 
         private fun conflictingBoundaryDirectionError(path: UppaalPath): UppaalMessage =
             createUppaalError(path, "A boundary point on a sub-template reference must have the same direction as the boundary point it references", isUnrecoverable = true)

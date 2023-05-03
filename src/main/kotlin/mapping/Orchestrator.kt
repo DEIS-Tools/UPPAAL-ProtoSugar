@@ -53,11 +53,11 @@ class Orchestrator(activeMappers: List<String>) {
         val newSimulatorPhases = ArrayList<SimulatorPhase>()
         val newQueryPhases = ArrayList<QueryPhase>()
 
-        val model = IndexingModelWalker(syntaxRegistry).buildIndex(nta)
+        val scope = IndexingModelWalker(syntaxRegistry).buildIndex(nta)
 
         clearCache()
         modelPhases = ArrayList()
-        for (mapperPhases in mappers.map { it.buildAndConfigurePhases(syntaxRegistry, model) }) {
+        for (mapperPhases in mappers.map { it.buildAndConfigurePhases(syntaxRegistry, scope) }) {
             for (phase in mapperPhases.modelPhases) {
                 phase.phaseIndex = modelPhases!!.size
                 modelPhases!!.add(phase)

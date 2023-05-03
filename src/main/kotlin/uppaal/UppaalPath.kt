@@ -9,6 +9,7 @@ class UppaalPath private constructor(path: List<PathNode>): ArrayList<PathNode>(
 
     fun extend(element: UppaalPojo, index: Int? = null) = UppaalPath(plus(PathNode(element, index)))
     operator fun plus(element: IndexedValue<UppaalPojo>) = UppaalPath(plus(PathNode(element.value, element.index + 1))) // +1 since UPPAAL paths are 1-indexed
+    operator fun plus(element: UppaalPojo) = UppaalPath(plus(PathNode(element)))
 
     override fun toString() =
         if (isEmpty()) ""
